@@ -28,13 +28,13 @@
     {
       "id": "0.5",
       "title": "엔진·워크플로 설치",
-      "status": "doing",
+      "status": "done",
       "note": "엔진 설치 PR"
     },
     {
       "id": "0.6",
       "title": "매뉴얼·개발 규칙",
-      "status": "doing",
+      "status": "done",
       "note": "CLAUDE.md·AGENTS.md, 실데이터·비밀값 금지"
     },
     {
@@ -64,13 +64,13 @@
     {
       "id": "0.11",
       "title": "프로젝트 스킬",
-      "status": "na",
-      "note": "필요할 때 계획별로 반영"
+      "status": "done",
+      "note": "quant-research(모델·뉴스), backtest-expert·residual-edge-analyzer"
     },
     {
       "id": "0.12",
       "title": "CI·테스트",
-      "status": "doing",
+      "status": "done",
       "note": "타입·Node 테스트·pytest·빌드·개인정보 검사"
     },
     {
@@ -83,7 +83,7 @@
       "id": "0.14",
       "title": "외부 데이터 키",
       "status": "todo",
-      "note": "KRX·공공데이터포털·Finnhub·Tiingo·네이버·DART·ECOS·FRED"
+      "note": "Tiingo·FRED·공공데이터포털·네이버·Finnhub·OpenDART"
     },
     {
       "id": "0.15",
@@ -94,14 +94,14 @@
     {
       "id": "0.16",
       "title": "통합 상황판 연결",
-      "status": "todo",
+      "status": "done",
       "note": "상황판 ORCH_REPOS 등록"
     },
     {
       "id": "0.17",
       "title": "DB·파일 보관소",
-      "status": "todo",
-      "note": "Neon 무료 프로젝트, Cloudflare R2"
+      "status": "doing",
+      "note": "스키마·CI 테스트 완료, Neon 키 대기"
     },
     {
       "id": "0.18",
@@ -112,7 +112,7 @@
     {
       "id": "0.19",
       "title": "Python 실행 지원",
-      "status": "doing",
+      "status": "done",
       "note": "엔진이 requirements.txt 설치 (ai-orchestrator #366)"
     },
     {
@@ -128,49 +128,49 @@
       "id": "0",
       "title": "준비",
       "status": "doing",
-      "note": "엔진 설치·Python 지원·키 발급 · 조건: CI에서 Python 테스트 통과"
+      "note": "엔진·CI·규칙·스킬 · 남은 것: Claude 토큰·codex-login·데이터 키"
     },
     {
       "id": "1",
       "title": "데이터 수집",
-      "status": "todo",
-      "note": "한·미 일봉·종목 마스터·품질 기록 · 조건: 2주 연속 자동 수집"
+      "status": "doing",
+      "note": "수집기·매일 워크플로 완료, 키 넣으면 시작 · 재무(SEC) 추가 · 조건: 2주 연속"
     },
     {
       "id": "2",
-      "title": "현황 화면",
-      "status": "todo",
-      "note": "오늘·시장·종목 탭 · 조건: 화면 시안 승인"
+      "title": "화면",
+      "status": "doing",
+      "note": "시장(오늘·트렌드)·투자(실험실·백테스트·투자) 시안 확정 → 프로토타입 → 실데이터"
     },
     {
       "id": "3",
-      "title": "뉴스·공시 브리핑",
+      "title": "뉴스·공시",
       "status": "todo",
-      "note": "아침 브리핑·뉴스 묶기(규칙 기반) · 조건: 2주 빠짐없이"
+      "note": "브리핑 + 뉴스 특성(장 마감 기준·중복·건수·감성·8-K)"
     },
     {
       "id": "4",
-      "title": "백테스트",
-      "status": "todo",
-      "note": "엔진·세금·환율·기준선(미국 상장 S&P 500 ETF 보유)"
+      "title": "실험실·백테스트",
+      "status": "doing",
+      "note": "골격 완료 · 포착률·회복 기간·시도 수 보정·계좌 규모별 세후"
     },
     {
       "id": "5",
-      "title": "규칙 전략·모의투자",
+      "title": "아이디어·자동 실험",
       "status": "todo",
-      "note": "개별주·ETF 둘 다 검증 · 조건: 홀드아웃 통과 + 모의 3개월"
+      "note": "내 아이디어 → Fable 검토 → 시험, 주 1회 자동 가설(월 50회 예산)"
     },
     {
       "id": "6",
-      "title": "소액 실전",
+      "title": "모의→실전",
       "status": "todo",
-      "note": "자동매매(사람 승인) · 끝나면 기존 GCP 앱 종료"
+      "note": "모의는 실행 확인(3개월 또는 20회), 사람 승인 후 소액 실전 · 끝나면 GCP 앱 종료"
     },
     {
       "id": "7",
       "title": "예측 모델",
       "status": "todo",
-      "note": "상시 실험, 통과한 모델만 5단계 절차로"
+      "note": "종목 순위 모델(규칙→선형→부스팅→DL), 규칙을 비용 포함 이길 때만"
     }
   ]
 }
