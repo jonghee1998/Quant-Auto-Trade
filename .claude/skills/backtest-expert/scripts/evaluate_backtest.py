@@ -45,7 +45,7 @@ def score_sample_size(total_trades: int) -> int:
     return 20
 
 
-# Float noise (e.g. expectancy 2.2e-16 for 40/3/2, profit factor 1.0000000000000002)
+# Float noise (e.g. expectancy 2.2e-16 for 40/3/2, profit factor 1.0000000000000002)  # pii-allow
 # must not turn a break-even strategy into a passing one, and cancellation error grows
 # with input magnitude (30/3.5e9/1.5e9 gives 1.2e-07; 10.1/8.99e16/1.01e16 gives -2.0
 # instead of +0.222). No fixed tolerance is safe, so expectancy and profit factor are
