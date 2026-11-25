@@ -13,3 +13,5 @@ __pycache__/
 .pytest_cache/
 data/
 *.parquet
+.open-next
+.wrangler

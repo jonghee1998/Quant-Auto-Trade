@@ -16,15 +16,11 @@ export async function getMarket(): Promise<MarketData> {
   const url = process.env.DATABASE_URL;
   if (!url) return SAMPLE;
   try {
-    const { Client } = await import('pg');
-    const c = new Client({ connectionString: url, ssl: { rejectUnauthorized: false } });
-    await c.connect();
-    try {
-      const r = await c.query('select payload from daily_brief order by date desc limit 1');
-      return fromPayload(r.rows[0]?.payload) ?? SAMPLE;
-    } finally {
-      await c.end();
-    }
+    // Neon 서버리스 드라이버(HTTP): Node·Cloudflare Workers 둘 다 동작
+    const { neon } = await import('@neondatabase/serverless');
+    const sql = neon(url);
+    const rows = (await sql`select payload from daily_brief order by date desc limit 1`) as { payload: unknown }[];
+    return fromPayload(rows[0]?.payload) ?? SAMPLE;
   } catch {
     return SAMPLE; // DB 오류 시에도 화면은 뜬다(예시 값 표시)
   }

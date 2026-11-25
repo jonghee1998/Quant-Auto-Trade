@@ -1,0 +1,49 @@
+name: deploy-cf
+# 화면 배포: main에 화면 관련 변경이 들어오면 Cloudflare Workers(무료)로 배포한다(OpenNext).
+# 필요한 Secrets: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID (없으면 건너뜀). DATABASE_URL이 있으면 Worker 비밀값으로 넣는다.
+on:
+  push:
+    branches: [main]
+    paths: ['app/**', 'components/**', 'lib/**', 'public/**', 'package.json', 'package-lock.json', 'next.config.ts', 'wrangler.jsonc', 'open-next.config.ts']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: deploy-cf
+  cancel-in-progress: true
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - id: has
+        env:
+          T: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          A: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: if [ -n "$T" ] && [ -n "$A" ]; then echo "run=true" >> "$GITHUB_OUTPUT"; else echo "Cloudflare 키 없음 — 건너뜀"; fi
+      - if: steps.has.outputs.run == 'true'
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - if: steps.has.outputs.run == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - if: steps.has.outputs.run == 'true'
+        run: npm ci
+      - name: Build and deploy
+        if: steps.has.outputs.run == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npm run cf:deploy
+      - name: Worker secret DATABASE_URL
+        if: steps.has.outputs.run == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          if [ -z "$DATABASE_URL" ]; then echo "DATABASE_URL 없음 — 예시 값으로 표시"; exit 0; fi
+          printf '%s' "$DATABASE_URL" | npx wrangler secret put DATABASE_URL
