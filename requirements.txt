@@ -5,3 +5,4 @@ numpy>=2.0,<3
 pyarrow>=17,<22
 duckdb>=1.1,<2
 pytest>=8,<9
+psycopg[binary]>=3.2,<4
