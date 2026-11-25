@@ -40,4 +40,5 @@ jobs:
           NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
           FINNHUB_TOKEN: ${{ secrets.FINNHUB_TOKEN }}
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
         run: python -m quant.ingest.run --days "${{ inputs.days || '5' }}"

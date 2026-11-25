@@ -63,6 +63,17 @@ def upsert_news(conn, rows: list[dict]) -> int:
     return len(rows)
 
 
+def upsert_fundamentals(conn, rows: list[dict]) -> int:
+    with conn.cursor() as cur:
+        cur.executemany(
+            """insert into fundamentals (market, code, concept, unit, period_start, period_end, fiscal_period, value,
+                 filed_date, form, source) values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+               on conflict (market, code, concept, unit, period_end, filed_date) do update set value = excluded.value""",
+            [(r["market"], r["code"], r["concept"], r["unit"], r.get("period_start"), r["period_end"],
+              r.get("fiscal_period"), r["value"], r["filed_date"], r.get("form"), r["source"]) for r in rows])
+    return len(rows)
+
+
 def start_run(conn, source: str, dataset: str) -> int:
     with conn.cursor() as cur:
         cur.execute("insert into ingest_runs (source, dataset, started_at, status) values (%s, %s, %s, 'running') returning id",

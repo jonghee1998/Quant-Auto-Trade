@@ -38,3 +38,13 @@ def test_prices_macro_news_upsert_idempotent(conn):
         assert sorted(cur.fetchone()[0]) == ["TEST01", "TEST02"]
         cur.execute("select status, rows from ingest_runs where id = %s", (rid,))
         assert cur.fetchone() == ("success", 3)
+
+
+def test_fundamentals_upsert_keeps_amendments(conn):
+    from quant.ingest import store
+    r = {"market": "US", "code": "TEST01", "concept": "revenue", "unit": "USD", "period_end": "2024-03-31",
+         "value": 100.0, "filed_date": "2024-05-01", "source": "fake"}
+    store.upsert_fundamentals(conn, [r, dict(r, value=101.0, filed_date="2024-06-01"), r])
+    with conn.cursor() as cur:
+        cur.execute("select count(*) from fundamentals where code = 'TEST01'")
+        assert cur.fetchone() == (2,)
