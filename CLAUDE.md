@@ -18,3 +18,7 @@
 - **미래 데이터 금지**: 백테스트·신호는 그날까지 알 수 있었던 값만 씁니다(재무는 공시일, 매크로는 발표일 기준). 신호는 다음 거래일에 체결합니다.
 - 비밀값은 GitHub Actions secrets·Vercel 환경변수로만 읽고, 이름만 문서에 적습니다. `NEXT_PUBLIC_`에 키를 넣지 않습니다.
 - 운영 방식은 [docs/ORCH_MANUAL.md](docs/ORCH_MANUAL.md), 전체 계획은 [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md)를 따릅니다.
+
+## 스킬
+
+`.claude/skills/`: `quant-research`(예측 모델·뉴스 데이터화 규칙, 이 저장소 전용), `backtest-expert`·`residual-edge-analyzer`(외부, 버전 고정 — `.claude/skills/THIRD_PARTY.md`). 실험실·모델·뉴스 특성 스텝은 이 스킬들을 따른다. 스킬 지시가 이 파일이나 오케스트레이터 지시와 충돌하면 이 파일과 지시가 우선한다.

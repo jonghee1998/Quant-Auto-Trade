@@ -10,12 +10,12 @@ import os
 from datetime import date, timedelta
 from typing import Callable
 
-from . import sources as S, store, universe as U
+from . import sec, sources as S, store, universe as U
 from .http import Fetch, requests_fetch
 from .quality import check_prices
 
 ENV = {"tiingo": ["TIINGO_TOKEN"], "fred": ["FRED_API_KEY"], "kr": ["DATA_GO_KR_KEY"],
-       "naver": ["NAVER_CLIENT_ID", "NAVER_CLIENT_SECRET"], "finnhub": ["FINNHUB_TOKEN"]}
+       "naver": ["NAVER_CLIENT_ID", "NAVER_CLIENT_SECRET"], "finnhub": ["FINNHUB_TOKEN"], "sec": ["SEC_USER_AGENT"]}
 
 
 def plan(env: dict, today: date, days: int) -> list[tuple[str, str, Callable[[Fetch], list[dict]], str]]:
@@ -39,10 +39,21 @@ def plan(env: dict, today: date, days: int) -> list[tuple[str, str, Callable[[Fe
     if env.get("FINNHUB_TOKEN"):
         for t in U.US_NEWS_TICKERS:
             jobs.append(("finnhub", t, lambda f, t=t: S.finnhub_news(f, t, today - timedelta(days=2), today, env["FINNHUB_TOKEN"]), "news"))
+    if env.get("SEC_USER_AGENT"):
+        ua = env["SEC_USER_AGENT"]
+        cache: dict = {}
+
+        def facts(f, t):
+            if "map" not in cache:
+                cache["map"] = sec.ticker_map(f, ua)
+            cik = cache["map"].get(t)
+            return sec.company_facts(f, cik, t, ua) if cik else []
+        for t in U.US_STOCKS:
+            jobs.append(("sec", t, lambda f, t=t: facts(f, t), "fundamentals"))
     return jobs
 
 
-SAVE = {"prices": store.upsert_prices, "macro": store.upsert_macro, "news": store.upsert_news}
+SAVE = {"fundamentals": store.upsert_fundamentals, "prices": store.upsert_prices, "macro": store.upsert_macro, "news": store.upsert_news}
 
 
 def run(env: dict, fetch: Fetch, conn=None, today: date | None = None, days: int = 5, out=print) -> dict:
