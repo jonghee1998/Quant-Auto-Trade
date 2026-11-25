@@ -1,16 +1,17 @@
 import Link from 'next/link';
 import { Proto, Back } from '../../../components/ui';
-import { QUOTES } from '../../../lib/mock';
+import { getMarket } from '../../../lib/source';
 import { num, pct } from '../../../lib/format';
 
 const RELATED = [['금융 여건 (NFCI)', '−0.48 · 느슨함'], ['VIX 단기/중기', '0.92 · 정상'], ['하이일드 스프레드', '안정 (상태만 표시)'], ['장단기 금리차 (10년−3개월)', '+0.38%p']];
 
 export default async function Indicator({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const q = QUOTES.find((x) => x.id === id);
+  const d = await getMarket();
+  const q = d.quotes.find((x) => x.id === id);
   return (
     <main className="page">
-      <Proto />
+      <Proto sample={d.sample} />
       <Back href="/" label="시장" />
       <div style={{ padding: '0 16px' }}>
         <h1 style={{ margin: 0, fontSize: 22 }}>{q?.name ?? id}</h1>

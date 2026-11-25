@@ -1,0 +1,152 @@
+"""화면용 하루 요약(payload) 계산 → daily_brief 저장. 화면은 이 JSON만 읽는다.
+
+python -m quant.snapshot  (DATABASE_URL 필요)
+값이 없으면 null로 두고 화면이 "—"로 보여준다. 문장은 규칙 기반(유료 AI 없음).
+"""
+from __future__ import annotations
+
+import json
+import math
+import os
+from datetime import date
+
+import pandas as pd
+
+from . import market as MK
+from .ingest import universe as U
+
+QUOTE_DEFS = [  # (id, 이름, 종류, 원천)
+    ("spx", "미국 S&P 500 (SPY)", "etf", "SPY"),
+    ("ndx", "미국 나스닥 100 (QQQ)", "etf", "QQQ"),
+    ("korea", "한국 (EWY)", "etf", "EWY"),
+    ("usdkrw", "원/달러 환율", "macro", "DEXKOUS"),
+    ("vix", "불안 지수 VIX", "macro", "VIXCLS"),
+]
+
+
+def _f(x) -> float | None:
+    try:
+        v = float(x)
+    except (TypeError, ValueError):
+        return None
+    return v if math.isfinite(v) else None
+
+
+def _ret(s: pd.Series, days: int) -> float | None:
+    s = s.dropna()
+    return _f((s.iloc[-1] / s.iloc[-1 - days] - 1) * 100) if len(s) > days else None
+
+
+def quote(qid: str, name: str, s: pd.Series) -> dict:
+    s = s.dropna()
+    z = MK.move_z(s) if len(s) else {"change": None, "std": None}
+    q = {"id": qid, "name": name, "value": _f(s.iloc[-1]) if len(s) else None, "change": _f(z["change"]),
+         "dailyStd": _f(z["std"]), "m1": _ret(s, 21), "y1": _ret(s, 252)}
+    if qid in ("vix", "usdkrw") and len(s) > 1:
+        diff = s.iloc[-1] - s.iloc[-2]
+        q["changeText"] = f"{'+' if diff >= 0 else '−'}{abs(diff):.1f}{'원' if qid == 'usdkrw' else ''}"
+    if qid == "usdkrw":
+        q["unit"] = "원"
+    if qid == "vix":
+        q["note"] = "보통 15~20 · 30 넘으면 공포"
+    return q
+
+
+def summary_line(quotes: list[dict]) -> str:
+    by = {q["id"]: q for q in quotes}
+
+    def word(q):
+        c, sd = (q or {}).get("change"), (q or {}).get("dailyStd")
+        if c is None:
+            return None
+        size = "크게" if sd and abs(c / sd) >= 2 else "조금"
+        return f"{size} {'올랐' if c > 0 else '내렸'}"
+    parts = []
+    us, kr = word(by.get("spx")), word(by.get("korea"))
+    if us:
+        parts.append(f"미국은 {us}고")
+    if kr:
+        parts.append(f"한국은 {kr}어요")
+    vix = (by.get("vix") or {}).get("value")
+    tail = "" if vix is None else (" 불안감(VIX)은 공포 수준이에요." if vix >= 30 else " 불안감(VIX)은 보통보다 높아요." if vix >= 20 else " 불안감(VIX)은 낮은 편이에요.")
+    head = ", ".join(parts) if parts else "오늘 값이 아직 없어요"
+    if parts and not head.endswith("요"):
+        head += "요"
+    return (head + "." if not head.endswith(".") else head) + tail
+
+
+def universe_rows(px: pd.DataFrame, names: dict, kind: str, market: str) -> list[dict]:
+    cols = [c for c in names if c in px.columns]
+    if not cols:
+        return []
+    r = MK.period_returns(px[cols])
+    return [{"code": c, "name": names[c], "kind": kind, "market": market, "r": [_f(r.loc[c, d]) for d in (21, 63, 126)]} for c in cols]
+
+
+def build_payload(us_px: pd.DataFrame, macro: dict[str, pd.Series], news: list[dict], kr_px: pd.DataFrame | None = None,
+                  kr_names: dict | None = None, as_of: str | None = None) -> dict:
+    quotes = []
+    for qid, name, kind, src in QUOTE_DEFS:
+        s = us_px[src] if kind == "etf" and src in us_px else macro.get(src, pd.Series(dtype=float))
+        quotes.append(quote(qid, name, s))
+    sectors = [c for c in U.SECTORS if c.startswith("XL") and c in us_px]
+    spy = us_px["SPY"] if "SPY" in us_px else pd.Series(dtype=float)
+    light = MK.trend_light(spy)
+    bench_us = [_ret(spy, d) for d in (21, 63, 126)]
+    universe = universe_rows(us_px, U.SECTORS, "업종", "US") + universe_rows(us_px, U.COUNTRIES, "나라", "W")
+    bench_kr = [None, None, None]
+    if kr_px is not None and kr_names:
+        universe += universe_rows(kr_px, kr_names, "주식", "KR")
+    return {
+        "asOf": as_of, "summary": summary_line(quotes), "quotes": quotes,
+        "trendLight": {"state": light["state"], "gapPct": _f(light["gap_pct"])},
+        "breadth": MK.breadth(us_px[sectors]) if sectors else {"above": 0, "total": 0},
+        "universe": universe, "bench": {"US": bench_us, "W": bench_us, "KR": bench_kr},
+        "news": [{"title": n["title"], "where": "한국" if n.get("source") == "naver" else "미국"} for n in news[:5]],
+    }
+
+
+def load_from_db(conn, days: int = 400) -> tuple[pd.DataFrame, dict, list[dict]]:
+    with conn.cursor() as cur:
+        cur.execute("""select i.code, p.date, p.close * p.adj_factor from prices_daily p join instruments i on i.id = p.instrument_id
+                       where i.market = 'US' and p.date >= current_date - %s""", (days,))
+        px = pd.DataFrame(cur.fetchall(), columns=["code", "date", "close"])
+        cur.execute("""select distinct on (series, ref_date) series, ref_date, value from macro_series
+                       where ref_date >= current_date - %s order by series, ref_date, release_date desc""", (days,))
+        mc = pd.DataFrame(cur.fetchall(), columns=["series", "date", "value"])
+        cur.execute("select title, source from news order by published_at desc limit 20")
+        news = [{"title": t, "source": s} for t, s in cur.fetchall()]
+    us = px.pivot(index="date", columns="code", values="close").sort_index() if len(px) else pd.DataFrame()
+    us.index = pd.to_datetime(us.index)
+    macro = {k: g.set_index(pd.to_datetime(g["date"]))["value"].sort_index() for k, g in mc.groupby("series")} if len(mc) else {}
+    return us, macro, news
+
+
+def save(conn, payload: dict, day: date) -> None:
+    with conn.cursor() as cur:
+        cur.execute("""insert into daily_brief (date, summary, payload) values (%s, %s, %s)
+                       on conflict (date) do update set summary = excluded.summary, payload = excluded.payload, generated_at = now()""",
+                    (day, payload["summary"], json.dumps(payload, ensure_ascii=False)))
+    conn.commit()
+
+
+def main() -> int:
+    url = os.environ.get("DATABASE_URL")
+    if not url:
+        print("DATABASE_URL 없음 → 건너뜀")
+        return 0
+    import psycopg
+    with psycopg.connect(url) as conn:
+        us, macro, news = load_from_db(conn)
+        if us.empty:
+            print("시세가 아직 없음 → 건너뜀")
+            return 0
+        day = us.index[-1].date()
+        payload = build_payload(us, macro, news, as_of=str(day))
+        save(conn, payload, day)
+        print(f"daily_brief {day}: {payload['summary']}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

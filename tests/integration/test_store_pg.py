@@ -48,3 +48,23 @@ def test_fundamentals_upsert_keeps_amendments(conn):
     with conn.cursor() as cur:
         cur.execute("select count(*) from fundamentals where code = 'TEST01'")
         assert cur.fetchone() == (2,)
+
+
+def test_snapshot_roundtrip(conn):
+    import datetime as dt
+    import numpy as np
+    from quant import snapshot as SN
+    from quant.ingest import store
+    today = dt.date.today()
+    days = [today - dt.timedelta(days=i) for i in range(260, -1, -1)]
+    rows = [{"market": "US", "code": "SPY", "date": d.isoformat(), "close": 100 + i * 0.1, "adj_factor": 1.0, "source": "fake", "kind": "etf"}
+            for i, d in enumerate(days)]
+    store.upsert_prices(conn, rows)
+    store.upsert_macro(conn, [{"series": "VIXCLS", "ref_date": d.isoformat(), "release_date": d.isoformat(), "value": 15.0, "source": "fake"} for d in days[-30:]])
+    us, macro, news = SN.load_from_db(conn)
+    assert "SPY" in us.columns and "VIXCLS" in macro
+    p = SN.build_payload(us, macro, news, as_of=str(today))
+    SN.save(conn, p, today)
+    with conn.cursor() as cur:
+        cur.execute("select payload->'trendLight'->>'state' from daily_brief where date = %s", (today,))
+        assert cur.fetchone() == ("green",)

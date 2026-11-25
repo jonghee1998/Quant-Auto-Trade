@@ -1,13 +1,17 @@
 import Link from 'next/link';
 import { Proto, TabBar, MarketSeg, Signed } from '../components/ui';
-import { AS_OF, QUOTES, SUMMARY, TREND_LIGHT, BREADTH, NEWS } from '../lib/mock';
+import { getMarket } from '../lib/source';
 import { num, pct, moveLabel } from '../lib/format';
 
-export default function Today() {
+export const revalidate = 600;
+
+export default async function Today() {
+  const d = await getMarket();
+  const { asOf: AS_OF, quotes: QUOTES, summary: SUMMARY, trendLight: TREND_LIGHT, breadth: BREADTH, news: NEWS } = d;
   const green = TREND_LIGHT.state === 'green';
   return (
     <main className="page">
-      <Proto />
+      <Proto sample={d.sample} />
       <div className="head">
         <h1>시장</h1>
         <Link href="/data" className="sub" style={{ display: 'flex', alignItems: 'center', gap: 6, height: 44 }}>
@@ -24,8 +28,8 @@ export default function Today() {
           <span style={{ width: 14, height: 14, borderRadius: 7, background: green ? 'var(--ok)' : 'var(--up)' }} />
         </span>
         <div>
-          <div className="b" style={{ fontSize: 15 }}>시장 추세 신호등: {green ? '초록' : '빨강'}</div>
-          <div className="sub">S&amp;P 500이 200일 평균선보다 {pct(TREND_LIGHT.gapPct)} · 11개 업종 중 {BREADTH.above}개가 장기 추세 위</div>
+          <div className="b" style={{ fontSize: 15 }}>시장 추세 신호등: {TREND_LIGHT.state === null ? '—' : green ? '초록' : '빨강'}</div>
+          <div className="sub">S&amp;P 500이 200일 평균선보다 {pct(TREND_LIGHT.gapPct)} · {BREADTH.total}개 업종 중 {BREADTH.above}개가 장기 추세 위</div>
         </div>
       </section>
       <section className="card" style={{ paddingTop: 2, paddingBottom: 2 }}>
