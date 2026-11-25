@@ -21,7 +21,7 @@ export function num(v: Num, digits = 0): string {
   return v.toLocaleString('ko-KR', { minimumFractionDigits: digits, maximumFractionDigits: digits });
 }
 
-/** 원화 금액: 10,412,000원 */
+/** 원화 금액 표시(천 단위 구분 + 원). */
 export function won(v: Num): string {
   return ok(v) ? `${num(Math.round(v))}원` : '—';
 }
