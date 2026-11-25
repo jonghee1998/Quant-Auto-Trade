@@ -1,0 +1,10 @@
+// Cloudflare Workers 배포 설정 (OpenNext). 비밀값(DATABASE_URL)은 여기에 쓰지 않고 wrangler secret으로 넣는다.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "quant-auto-trade",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2025-09-01",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": { "directory": ".open-next/assets", "binding": "ASSETS" },
+  "observability": { "enabled": true }
+}

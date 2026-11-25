@@ -8,20 +8,23 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --test tests/*.test.mjs scripts/orch/*.test.mjs && python3 -m pytest -q tests",
-    "pii-scan": "node scripts/orch/pii-scan.mjs"
+    "pii-scan": "node scripts/orch/pii-scan.mjs",
+    "cf:build": "opennextjs-cloudflare build",
+    "cf:deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy"
   },
   "dependencies": {
+    "@neondatabase/serverless": "^1.2.1",
+    "@opennextjs/cloudflare": "^1.20.18",
     "next": "^15.2.0",
-    "pg": "^8.23.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "server-only": "^0.0.1"
   },
   "devDependencies": {
     "@types/node": "^22.13.0",
-    "@types/pg": "^8.23.1",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "wrangler": "^4.168.0"
   }
 }

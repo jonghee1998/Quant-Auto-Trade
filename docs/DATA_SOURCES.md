@@ -14,3 +14,6 @@
 | `SEC_USER_AGENT` | SEC EDGAR (키 없음) | 미국 재무(매출·영업이익·순이익·EPS·자본, 공시일 기준) | 초당 10회 · 값은 `앱이름 연락이메일` 형식 |
 
 대상 목록: `quant/ingest/universe.py`. 품질 점검(중복·고가<저가·하루 ±50% 급변)은 `ingest_runs`에 `partial`로 남긴다.
+
+## 화면 배포 (Cloudflare Workers, 무료)
+`deploy-cf.yml`이 main의 화면 변경마다 배포한다. Secrets: `CLOUDFLARE_API_TOKEN`(템플릿 "Edit Cloudflare Workers"), `CLOUDFLARE_ACCOUNT_ID`. 주소는 `https://quant-auto-trade.<계정 하위도메인>.workers.dev`. `DATABASE_URL`이 있으면 Worker 비밀값으로 넣어 실데이터를 보여 준다(없으면 예시 값).
