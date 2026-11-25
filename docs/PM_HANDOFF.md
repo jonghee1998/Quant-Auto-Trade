@@ -1,11 +1,16 @@
 # PM 인수인계
 
-_마지막 갱신: 2026-11-25 (0단계 엔진 설치)_
+_마지막 갱신: 2026-11-25 (수집·화면 프로토타입·실험실 흐름)_
 
 ## 현재 상태
-- 0단계(준비) 진행 중. 엔진·CI·개발 규칙을 설치했다(PM 직접). 엔진의 Python 패키지 지원은 ai-orchestrator #366(같은 변경 Personal-dashboard #135).
-- 실험실 골격(`quant/lab/`: 전략 인터페이스·원화 세후 백테스트·기준선 비교·홀드아웃 잠금·실험 기록, 사용법 `docs/LAB.md`)과 기본 DB 스키마(`db/migrations/0001_init.sql`, CI Postgres 테스트)를 PM이 미리 넣었다(엔진이 아직 멈춰 있어서). 화면은 자리표시.
-- 구조 문서 `docs/architecture.json` → 상황판 구조 탭에 Quant 카드로 보인다.
+- 엔진이 아직 멈춰 있어(Claude 토큰·codex-login·ORCH_PAUSED) PM이 직접 PR로 만들었다:
+  - 수집: `quant/ingest/`(Tiingo·FRED·공공데이터포털·네이버·Finnhub·SEC EDGAR), 매일 `ingest.yml`(키 없는 소스 건너뜀) → `quant.snapshot`이 화면 요약을 `daily_brief`에 저장. 비밀값 이름: `docs/DATA_SOURCES.md`.
+  - DB: `db/migrations/0001_init.sql`, `0002_fundamentals.sql` + CI Postgres 테스트.
+  - 화면: 시안(https://claude.ai/artifact/EX1zt5fa8FBmd3D58fzob5) 그대로 Next.js 프로토타입. `lib/source.ts`가 DB 있으면 실데이터, 없으면 예시 값. 시장(오늘·트렌드)·투자(실험실·백테스트·투자) 2탭.
+  - 실험실: `quant/lab/`(백테스트·포착률·회복·DSR·DB 기록), `quant/strategies/`(trend_filter, sector_momentum), `lab-run.yml`, 아이디어 흐름 `lab-idea.yml`(사용법 `docs/LAB_RUN.md`, 원칙 `docs/LAB.md`).
+  - 계산: `quant/market.py`(추세 신호등·업종 폭·상대강도·평소 대비), `quant/news_features.py`(16:00 ET 경계·중복·건수 급증).
+  - 스킬: `.claude/skills/`(quant-research, backtest-expert, residual-edge-analyzer). 리서치: `docs/research/`.
+- 엔진 Fable 지원(`model: "fable"`, `ORCH_FABLE`)은 AO #374·PD #136·Quant #3.
 
 ## 결정한 것 (사용자)
 - 미국 중심, 기준선은 미국 상장 S&P 500 ETF 보유. 개별주·ETF 둘 다 검증. 한국은 현황·뉴스용.
@@ -15,9 +20,9 @@ _마지막 갱신: 2026-11-25 (0단계 엔진 설치)_
 - 실전 매매(6단계)와 주문 코드 변경은 자동 모드여도 사람이 승인한다.
 
 ## 다음 할 일
-1. 사람: 비밀값·키 등록(0.7~0.9, 0.14, 0.17), main 규칙(0.4), 상황판 ORCH_REPOS 등록(0.16).
-2. PM: 시험 작업 1건(1단계 첫 계획: 수집기 골격 + 가짜 응답 테스트)으로 엔진을 끝까지 돌려 0.20 완료.
-3. 1단계 계획: KRX OPEN API·KIS 해외 일봉 수집기, 종목 마스터, 품질 기록, R2·Neon 적재.
+1. 사람: Claude 토큰·codex-login·`ORCH_PAUSED` 삭제, 데이터 키(DATABASE_URL·TIINGO_TOKEN·FRED_API_KEY·DATA_GO_KR_KEY·NAVER_*·FINNHUB_TOKEN·SEC_USER_AGENT), Vercel 연결(0.13, 서버 환경변수 DATABASE_URL).
+2. PM: 키가 들어오면 `ingest` 수동 실행(days=400) → `lab-run trend_filter dev`로 첫 실측 → 결과를 투자 탭에 연결.
+3. 엔진 가동 후 계획: 휴장일 달력, 한국 지수·업종, 화면의 종목 상세(통계·재무) 실데이터, 투자 탭을 experiments 표와 연결, 모의투자(KIS 모의) 실행 확인.
 
 ## 계획 작성 체크리스트
 - 실제 코드 확인, 기존 테스트 충돌, 기계로 확인할 수 있는 done_when, 실패·경계 경우(휴장일·결측·분할·호출 제한).
