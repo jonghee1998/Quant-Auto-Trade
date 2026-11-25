@@ -2,6 +2,7 @@
 export const AS_OF = '11/25 14:40';
 
 export type Quote = { id: string; name: string; value: number | null; unit?: string; change: number | null; changeText?: string; dailyStd: number | null; m1: number | null; y1: number | null; note?: string };
+export type Bench = Record<'US' | 'KR' | 'W', (number | null)[]>;
 export const QUOTES: Quote[] = [
   { id: 'spx', name: '미국 S&P 500', value: 5980, change: 0.6, dailyStd: 0.9, m1: 2.1, y1: 18 },
   { id: 'ndx', name: '미국 나스닥', value: 19211, change: 0.9, dailyStd: 1.2, m1: 2.8, y1: 24 },
@@ -20,7 +21,7 @@ export const NEWS = [
   { title: '합성 헤드라인: 가짜종목A 내일 실적 발표', where: '미국' },
 ];
 
-export type Item = { code: string; name: string; kind: '업종' | '주식' | '나라'; market: 'US' | 'KR' | 'W'; r: [number, number, number] };
+export type Item = { code: string; name: string; kind: '업종' | '주식' | '나라'; market: 'US' | 'KR' | 'W'; r: [number | null, number | null, number | null] };
 export const UNIVERSE: Item[] = [
   ...([['XLK', '기술', [3.0, 11.6, 17.9]], ['XLC', '통신', [2.6, 8.5, 14.2]], ['GLD', '금', [2.9, 10.2, 19.5]], ['XLF', '금융', [1.2, 6.0, 12.1]], ['XLI', '산업', [2.4, 5.1, 9.0]], ['XLV', '헬스케어', [-0.8, 2.2, 3.4]], ['XLE', '에너지', [-2.2, -0.4, 1.9]], ['XLRE', '부동산', [-1.1, 1.3, 2.0]], ['TLT', '장기 국채', [1.8, -1.5, -2.9]]] as const)
     .map(([code, name, r]) => ({ code, name, kind: '업종' as const, market: 'US' as const, r: [...r] as [number, number, number] })),

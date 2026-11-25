@@ -1,16 +1,17 @@
 import Link from 'next/link';
 import { Proto, Back } from '../../../components/ui';
-import { UNIVERSE, BENCH } from '../../../lib/mock';
+import { getMarket } from '../../../lib/source';
 import { pct, pp, tone } from '../../../lib/format';
 
 export default async function Stock({ params }: { params: Promise<{ code: string }> }) {
   const { code } = await params;
-  const item = UNIVERSE.find((i) => i.code === code);
+  const d = await getMarket();
+  const item = d.universe.find((i) => i.code === code);
   const r = item?.r ?? [null, null, null];
-  const b = BENCH[item?.market ?? 'US'];
+  const b = d.bench[item?.market ?? 'US'];
   return (
     <main className="page">
-      <Proto />
+      <Proto sample={d.sample} />
       <Back href="/trend" label="트렌드" />
       <div style={{ padding: '0 16px' }}>
         <div className="sub">{code} · {item ? `${item.market === 'KR' ? '한국' : '미국'} · ${item.kind}` : '정보 없음'}</div>
@@ -26,7 +27,7 @@ export default async function Stock({ params }: { params: Promise<{ code: string
           <span /><span className="sub">1개월</span><span className="sub">3개월</span><span className="sub">6개월</span>
           <span style={{ textAlign: 'left' }}>이 종목</span>{r.map((v, i) => <span key={i} className={tone(v)}>{pct(v)}</span>)}
           <span style={{ textAlign: 'left' }}>기준</span>{b.map((v, i) => <span key={i}>{pct(v)}</span>)}
-          <span style={{ textAlign: 'left' }} className="b">차이</span>{r.map((v, i) => <span key={i} className={`b ${tone(v == null ? null : v - b[i])}`}>{pp(v == null ? null : v - b[i])}</span>)}
+          <span style={{ textAlign: 'left' }} className="b">차이</span>{r.map((v, i) => { const bi = b[i]; const diff = v == null || bi == null ? null : v - bi; return <span key={i} className={`b ${tone(diff)}`}>{pp(diff)}</span>; })}
         </div>
       </section>
       <section className="card" style={{ fontSize: 13 }}>

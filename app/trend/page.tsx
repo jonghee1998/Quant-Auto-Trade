@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { Proto, TabBar, MarketSeg } from '../../components/ui';
-import { WATCH, PICKS, AS_OF } from '../../lib/mock';
+import { WATCH, PICKS } from '../../lib/mock';
+import { getMarket } from '../../lib/source';
 import { pct, tone } from '../../lib/format';
 import TrendList from './TrendList';
 
@@ -13,11 +14,14 @@ function Pick({ p, up }: { p: { code: string; name: string; why: string }; up: b
   );
 }
 
-export default function Trend() {
+export const revalidate = 600;
+
+export default async function Trend() {
+  const d = await getMarket();
   return (
     <main className="page">
-      <Proto />
-      <div className="head"><h1>시장</h1><Link href="/data" className="sub">{AS_OF} 기준</Link></div>
+      <Proto sample={d.sample} />
+      <div className="head"><h1>시장</h1><Link href="/data" className="sub">{d.asOf} 기준</Link></div>
       <MarketSeg on="trend" />
       <section className="card" style={{ paddingBottom: 4 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between' }}><h2>관심 종목</h2><span className="sub">1개월 · 장기 추세</span></div>
@@ -38,7 +42,7 @@ export default function Trend() {
         <div className="b down" style={{ fontSize: 13, marginTop: 10 }}>나쁜 3</div>
         {PICKS.bad.map((p) => <Pick key={p.code} p={p} up={false} />)}
       </section>
-      <TrendList />
+      <TrendList universe={d.universe} bench={d.bench} />
       <div style={{ margin: '12px 16px 0' }}><input type="search" placeholder="목록에 없는 종목 찾기 (전 종목)" aria-label="종목 검색" /></div>
       <TabBar on="market" />
     </main>
