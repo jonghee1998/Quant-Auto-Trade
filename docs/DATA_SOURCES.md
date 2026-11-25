@@ -11,5 +11,6 @@
 | `DATA_GO_KR_KEY` | 공공데이터포털(금융위원회 주식·증권상품 시세) | 한국 주식·ETF 일봉 전 종목(T+1 13시) | 개발 하루 10,000 |
 | `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET` | 네이버 검색 API | 한국 시장 뉴스 | 하루 25,000 |
 | `FINNHUB_TOKEN` | Finnhub | 미국 종목 뉴스 | 분당 60 |
+| `SEC_USER_AGENT` | SEC EDGAR (키 없음) | 미국 재무(매출·영업이익·순이익·EPS·자본, 공시일 기준) | 초당 10회 · 값은 `앱이름 연락이메일` 형식 |
 
 대상 목록: `quant/ingest/universe.py`. 품질 점검(중복·고가<저가·하루 ±50% 급변)은 `ingest_runs`에 `partial`로 남긴다.

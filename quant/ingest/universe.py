@@ -5,3 +5,4 @@ US_ETFS = ["SPY", "VOO", "IVV", "QQQ", "IWM", "DIA", "TLT", "IEF", "SHY", "GLD",
 US_NEWS_TICKERS = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA"]
 FRED_SERIES = ["VIXCLS", "DEXKOUS", "DGS10", "DGS2", "T10Y2Y", "DFF", "BAMLH0A0HYM2", "CPIAUCSL", "UNRATE"]
 KR_NEWS_QUERIES = ["코스피", "코스닥", "환율", "미국 증시"]
+US_STOCKS = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "JPM", "XOM", "UNH"]
