@@ -15,7 +15,7 @@ m = evaluate(prices, fx, MyStrategy(...), hypothesis="왜 될 것 같은지", pa
 ```
 - `prices`: 날짜×종목 달러 수정종가, `fx`: 원/달러(앞으로만 채움, 빈 시작 구간은 오류).
 - 비용: 수수료·환전 스프레드(편도), 해외 양도세(연 공제 후 22%, 그해 마지막 거래일 납부). 끝까지 보유분은 `after_tax_if_liquidated`로 비교.
-- 결과에는 기준선 지표(`bench_*`, `excess_cagr`, `monthly_win_rate`)와 시도 번호(`trial_no`)가 함께 나온다.
+- 결과에는 기준선 지표(`bench_*`, `excess_cagr`, `monthly_win_rate`), 상승/하락 포착률(`up_capture`·`down_capture`), 회복 일수(`recovery_days`), `sortino`·`calmar`·`ulcer`, 우연 보정(`n_trials`·`dsr`, 0.95 이상이면 통과), 시도 번호(`trial_no`)가 함께 나온다. 계좌 규모별 세후는 `run_backtest(capital_krw=...)`로 바꿔 본다.
 
 ## 규칙
 1. 가설·조절값 범위·통과 기준을 실행 **전에** 계획 Issue에 적는다.

@@ -35,6 +35,18 @@ class Registry:
     def trials(self, strategy: str) -> int:
         return sum(1 for e in self.all() if e["strategy"] == strategy and not e.get("final"))
 
+    def total_trials(self) -> int:
+        """모든 전략을 합친 시도 수(최종 평가 제외). 우연 보정(DSR)의 n으로 쓴다."""
+        return sum(1 for e in self.all() if not e.get("final"))
+
+    def trial_sharpes(self) -> list[float]:
+        out = []
+        for e in self.all():
+            v = (e.get("metrics") or {}).get("sharpe")
+            if not e.get("final") and isinstance(v, (int, float)) and v == v:
+                out.append(float(v))
+        return out
+
     def has_final(self, strategy: str) -> bool:
         return any(e["strategy"] == strategy and e.get("final") for e in self.all())
 

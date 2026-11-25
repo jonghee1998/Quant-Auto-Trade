@@ -119,7 +119,9 @@ def test_holdout_is_locked_and_final_only_once(tmp_path):
     kw = dict(hypothesis="시험", params={}, splits=sp, registry=reg, costs=NO_COST)
     m = evaluate(p, _fx(p), BuyAndHold("SPY"), period="dev", **kw)
     assert m["trial_no"] == 1 and math.isfinite(m["cagr"])
-    evaluate(p, _fx(p), BuyAndHold("SPY"), period="valid", **kw)
+    assert m["n_trials"] == 1 and "dsr" in m and "down_capture" in m
+    m2 = evaluate(p, _fx(p), BuyAndHold("SPY"), period="valid", **kw)
+    assert m2["n_trials"] == 2  # 시도가 쌓이면 우연 보정의 n도 늘어난다
     assert reg.trials("buy_and_hold") == 2
     with pytest.raises(HoldoutLocked):
         evaluate(p, _fx(p), BuyAndHold("SPY"), period="holdout", **kw)
