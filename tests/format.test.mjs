@@ -14,7 +14,7 @@ test('부호와 단위', () => {
   assert.equal(pct(-3.45), '−3.5%');
   assert.equal(pct(0), '0.0%');
   assert.equal(pp(2), '+2.0%p');
-  assert.equal(won(10412000.4), '10,412,000원');
+  assert.equal(won(10412000.4), '10,412,000원'); // pii-allow (가짜 금액)
   assert.equal(tone(0.1), 'up'); assert.equal(tone(-0.1), 'down');
 });
 
