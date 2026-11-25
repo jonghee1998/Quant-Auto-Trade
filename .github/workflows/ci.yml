@@ -1,0 +1,108 @@
+name: ci
+# 엔진(orchestrator.yml)은 이름이 정확히 'ci'인 이 워크플로가 끝날 때 깨어난다. 이름을 바꾸지 않는다.
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements.txt
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  # 공개 저장소 개인정보 검사: 추가된 줄만 본다. 값은 로그에 다시 찍지 않는다.
+  pii:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Scan added lines
+        env:
+          PII_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event.before }}
+        run: node scripts/orch/pii-scan.mjs "$PII_BASE"
+
+  # 결과 화면 테스트: scripts/screens/run.mjs 가 생기면 자동으로 돈다(없으면 건너뜀).
+  # 가짜 데이터만 쓰므로 비밀값이 필요 없다.
+  screens:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - id: has
+        run: if [ -f scripts/screens/run.mjs ]; then echo "run=true" >> "$GITHUB_OUTPUT"; else echo "화면 테스트 없음 — 건너뜀"; fi
+      - if: steps.has.outputs.run == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - if: steps.has.outputs.run == 'true'
+        run: npm ci && npx playwright install --with-deps chromium && npm run build && npm run screens
+        env:
+          SCREENS_DIR: .screens
+      - name: Keep screenshots
+        if: always() && steps.has.outputs.run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: screens
+          path: .screens/
+          retention-days: 14
+          if-no-files-found: ignore
+
+  # DB 연동 테스트: 실제 PostgreSQL(가짜 데이터)에 db/migrations 를 순서대로 적용하고 tests/db/*.test.sql 을 실행한다.
+  # tests/db 가 없으면 잡 전체를 건너뛴다. 비밀값 없음. 운영 DB(Neon)에는 접근하지 않는다.
+  db:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: app_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d app_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Migrations + DB tests
+        env:
+          PGPASSWORD: postgres
+          PGHOST: localhost
+          PGUSER: postgres
+          PGDATABASE: app_test
+        run: |
+          if [ ! -d tests/db ]; then echo "DB 테스트 없음 — 건너뜀"; exit 0; fi
+          for f in $(ls db/migrations/*.sql | sort); do echo "apply $f"; psql -v ON_ERROR_STOP=1 -q -f "$f"; done
+          [ -f db/seed.sql ] && psql -v ON_ERROR_STOP=1 -q -f db/seed.sql
+          for t in $(ls tests/db/*.test.sql 2>/dev/null | sort); do echo "test $t"; psql -v ON_ERROR_STOP=1 -q -f "$t"; done

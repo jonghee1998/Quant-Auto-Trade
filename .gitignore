@@ -1,0 +1,15 @@
+node_modules
+.next
+.env
+.env.local
+.env.*.local
+*.tsbuildinfo
+__pycache__/
+*.pyc
+.screens/
+.env.*
+!.env.example
+.venv/
+.pytest_cache/
+data/
+*.parquet

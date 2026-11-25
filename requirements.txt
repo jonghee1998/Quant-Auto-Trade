@@ -1,0 +1,7 @@
+# 수집·분석(Python). 구현·검수·CI 환경이 이 파일로 설치한다.
+requests>=2.32,<3
+pandas>=2.2,<3
+numpy>=2.0,<3
+pyarrow>=17,<22
+duckdb>=1.1,<2
+pytest>=8,<9
