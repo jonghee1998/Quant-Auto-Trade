@@ -48,3 +48,17 @@ def test_fundamentals_upsert_keeps_amendments(conn):
     with conn.cursor() as cur:
         cur.execute("select count(*) from fundamentals where code = 'TEST01'")
         assert cur.fetchone() == (2,)
+
+
+def test_db_registry_trials_and_final_once(conn):
+    import pytest
+    from quant.lab.registry import DbRegistry, Experiment
+    reg = DbRegistry(conn)
+    base = dict(strategy="fake_strategy", hypothesis="합성", params={}, data_version="v", code_version="c")
+    r1 = reg.add(Experiment(period="dev", metrics={"sharpe": 0.5, "dsr": float("nan")}, **base))
+    r2 = reg.add(Experiment(period="valid", metrics={"sharpe": 0.7}, **base))
+    assert (r1["trial_no"], r2["trial_no"]) == (1, 2)
+    assert reg.total_trials() >= 2 and 0.5 in reg.trial_sharpes()
+    reg.add(Experiment(period="holdout", metrics={}, final=True, **base))
+    with pytest.raises(PermissionError):
+        reg.add(Experiment(period="holdout", metrics={}, final=True, **base))
