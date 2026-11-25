@@ -1,14 +1,14 @@
 'use client';
 import { useState } from 'react';
 import Link from 'next/link';
-import { UNIVERSE, BENCH } from '../../lib/mock';
+import type { Item, Bench } from '../../lib/mock';
 import { rankItems, barSpan, type Market, type Kind } from '../../lib/trend';
 import { pct, tone } from '../../lib/format';
 
 const PERIODS = ['1개월', '3개월', '6개월'] as const;
 const MARKETS: [Market, string][] = [['US', '미국'], ['KR', '한국'], ['W', '나라별']];
 
-export default function TrendList() {
+export default function TrendList({ universe: UNIVERSE, bench: BENCH }: { universe: Item[]; bench: Bench }) {
   const [strong, setStrong] = useState(true);
   const [market, setMarket] = useState<Market>('US');
   const [kind, setKind] = useState<Kind>('업종');
@@ -16,9 +16,9 @@ export default function TrendList() {
   const rows = rankItems(UNIVERSE, market, kind, period, strong);
   const bench = BENCH[market][period];
   const all = rankItems(UNIVERSE, market, kind, period, true, 1000).map((i) => Math.abs(i.ret));
-  const maxAbs = Math.max(...all, Math.abs(bench));
-  const benchPos = barSpan(bench, maxAbs);
-  const benchLeft = bench >= 0 ? benchPos.left + benchPos.width : benchPos.left;
+  const maxAbs = Math.max(1, ...all, Math.abs(bench ?? 0));
+  const benchPos = barSpan(bench ?? 0, maxAbs);
+  const benchLeft = (bench ?? 0) >= 0 ? benchPos.left + benchPos.width : benchPos.left;
   const what = market === 'W' ? '나라별' : `${market === 'US' ? '미국' : '한국'} ${kind === '업종' ? '업종 ETF' : '주식'}`;
   return (
     <>
@@ -41,7 +41,8 @@ export default function TrendList() {
       </div>
       <div style={{ margin: '16px 16px 0', fontSize: 16, fontWeight: 700 }}>{what} · 최근 {PERIODS[period]} {strong ? '가장 많이 오른 곳' : '가장 많이 내린 곳'}</div>
       <section className="card" style={{ paddingTop: 0, paddingBottom: 0 }}>
-        {rows.map((r, i) => {
+        {rows.length === 0 && <div className="row sub">— 아직 데이터가 없어요</div>}
+                {rows.map((r, i) => {
           const s = barSpan(r.ret, maxAbs);
           const t = tone(r.ret);
           return (

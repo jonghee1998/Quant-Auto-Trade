@@ -42,3 +42,7 @@ jobs:
           FINNHUB_TOKEN: ${{ secrets.FINNHUB_TOKEN }}
           SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
         run: python -m quant.ingest.run --days "${{ inputs.days || '5' }}"
+      - name: Snapshot for app (DB가 있을 때만)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python -m quant.snapshot
