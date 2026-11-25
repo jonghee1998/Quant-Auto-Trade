@@ -106,3 +106,13 @@ jobs:
           for f in $(ls db/migrations/*.sql | sort); do echo "apply $f"; psql -v ON_ERROR_STOP=1 -q -f "$f"; done
           [ -f db/seed.sql ] && psql -v ON_ERROR_STOP=1 -q -f db/seed.sql
           for t in $(ls tests/db/*.test.sql 2>/dev/null | sort); do echo "test $t"; psql -v ON_ERROR_STOP=1 -q -f "$t"; done
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Python DB tests (store upsert)
+        env:
+          TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/app_test
+        run: |
+          if [ ! -d tests/integration ]; then echo "없음 — 건너뜀"; exit 0; fi
+          python -m pip install -q -r requirements.txt
+          python -m pytest -q tests/integration
