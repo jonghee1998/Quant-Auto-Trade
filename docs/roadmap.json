@@ -1,0 +1,176 @@
+{
+  "version": 1,
+  "setup": [
+    {
+      "id": "0.1",
+      "title": "목적·최종 목표",
+      "status": "done",
+      "note": "한·미 시장 현황·뉴스, S&P 500 보유보다 나은 전략"
+    },
+    {
+      "id": "0.2",
+      "title": "기술 스택·아키텍처",
+      "status": "done",
+      "note": "Next.js·Vercel + Python·GitHub Actions + Neon·R2"
+    },
+    {
+      "id": "0.3",
+      "title": "GitHub 저장소",
+      "status": "done",
+      "note": "공개, 기존 Quant_Manager_App에서 코드만 참고"
+    },
+    {
+      "id": "0.4",
+      "title": "브랜치·권한·반영 정책",
+      "status": "todo",
+      "note": "main 규칙(삭제·강제 push 금지, 필수 검사 test)"
+    },
+    {
+      "id": "0.5",
+      "title": "엔진·워크플로 설치",
+      "status": "doing",
+      "note": "엔진 설치 PR"
+    },
+    {
+      "id": "0.6",
+      "title": "매뉴얼·개발 규칙",
+      "status": "doing",
+      "note": "CLAUDE.md·AGENTS.md, 실데이터·비밀값 금지"
+    },
+    {
+      "id": "0.7",
+      "title": "Claude 구독 토큰",
+      "status": "todo",
+      "note": "CLAUDE_CODE_OAUTH_TOKEN 등록"
+    },
+    {
+      "id": "0.8",
+      "title": "GitHub 작업 토큰",
+      "status": "todo",
+      "note": "BOT_PAT 에 이 저장소 추가"
+    },
+    {
+      "id": "0.9",
+      "title": "Codex 리뷰 연결",
+      "status": "todo",
+      "note": "CODEX_AUTH_KEY + codex-login 1회"
+    },
+    {
+      "id": "0.10",
+      "title": "Codex 사용량 인증",
+      "status": "na",
+      "note": "ai-orchestrator에서만 측정"
+    },
+    {
+      "id": "0.11",
+      "title": "프로젝트 스킬",
+      "status": "na",
+      "note": "필요할 때 계획별로 반영"
+    },
+    {
+      "id": "0.12",
+      "title": "CI·테스트",
+      "status": "doing",
+      "note": "타입·Node 테스트·pytest·빌드·개인정보 검사"
+    },
+    {
+      "id": "0.13",
+      "title": "Vercel 배포",
+      "status": "todo",
+      "note": "2단계 화면 전에 연결"
+    },
+    {
+      "id": "0.14",
+      "title": "외부 데이터 키",
+      "status": "todo",
+      "note": "KRX·공공데이터포털·Finnhub·Tiingo·네이버·DART·ECOS·FRED"
+    },
+    {
+      "id": "0.15",
+      "title": "모바일 알림",
+      "status": "na",
+      "note": "사용자 결정: 폰 알림 안 씀"
+    },
+    {
+      "id": "0.16",
+      "title": "통합 상황판 연결",
+      "status": "todo",
+      "note": "상황판 ORCH_REPOS 등록"
+    },
+    {
+      "id": "0.17",
+      "title": "DB·파일 보관소",
+      "status": "todo",
+      "note": "Neon 무료 프로젝트, Cloudflare R2"
+    },
+    {
+      "id": "0.18",
+      "title": "보안 검증",
+      "status": "doing",
+      "note": "개인정보 CI·외부 PR 승인·로그 규칙"
+    },
+    {
+      "id": "0.19",
+      "title": "Python 실행 지원",
+      "status": "doing",
+      "note": "엔진이 requirements.txt 설치 (ai-orchestrator #366)"
+    },
+    {
+      "id": "0.20",
+      "title": "개발 가능 상태",
+      "status": "todo",
+      "note": "시험 작업 1건 완주"
+    }
+  ],
+  "expansion": [],
+  "phases": [
+    {
+      "id": "0",
+      "title": "준비",
+      "status": "doing",
+      "note": "엔진 설치·Python 지원·키 발급 · 조건: CI에서 Python 테스트 통과"
+    },
+    {
+      "id": "1",
+      "title": "데이터 수집",
+      "status": "todo",
+      "note": "한·미 일봉·종목 마스터·품질 기록 · 조건: 2주 연속 자동 수집"
+    },
+    {
+      "id": "2",
+      "title": "현황 화면",
+      "status": "todo",
+      "note": "오늘·시장·종목 탭 · 조건: 화면 시안 승인"
+    },
+    {
+      "id": "3",
+      "title": "뉴스·공시 브리핑",
+      "status": "todo",
+      "note": "아침 브리핑·뉴스 묶기(규칙 기반) · 조건: 2주 빠짐없이"
+    },
+    {
+      "id": "4",
+      "title": "백테스트",
+      "status": "todo",
+      "note": "엔진·세금·환율·기준선(미국 상장 S&P 500 ETF 보유)"
+    },
+    {
+      "id": "5",
+      "title": "규칙 전략·모의투자",
+      "status": "todo",
+      "note": "개별주·ETF 둘 다 검증 · 조건: 홀드아웃 통과 + 모의 3개월"
+    },
+    {
+      "id": "6",
+      "title": "소액 실전",
+      "status": "todo",
+      "note": "자동매매(사람 승인) · 끝나면 기존 GCP 앱 종료"
+    },
+    {
+      "id": "7",
+      "title": "예측 모델",
+      "status": "todo",
+      "note": "상시 실험, 통과한 모델만 5단계 절차로"
+    }
+  ]
+}

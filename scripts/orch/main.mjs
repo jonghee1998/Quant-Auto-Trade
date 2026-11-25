@@ -1,0 +1,996 @@
+// Orchestrator entry point.
+//   node scripts/orch/main.mjs event    -> orchestrator.yml (state transitions)
+//   node scripts/orch/main.mjs prepare  -> claude-work.yml / work job, before Claude
+//   node scripts/orch/main.mjs commit   -> claude-work.yml / work job, after Claude
+//   node scripts/orch/main.mjs publish  -> claude-work.yml / publish job (open PR / request review / block)
+
+import fs from "node:fs";
+import path from "node:path";
+import { execFileSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
+import * as C from "./core.mjs";
+import { client } from "./github.mjs";
+
+const env = process.env;
+const REPO = env.GITHUB_REPOSITORY;
+const OWNER = REPO?.split("/")[0];
+const RUN_URL = `${env.GITHUB_SERVER_URL ?? "https://github.com"}/${REPO}/actions/runs/${env.GITHUB_RUN_ID}`;
+
+// Write client = owner PAT (its events trigger CI and Codex). Read/dispatch client = workflow GITHUB_TOKEN.
+const gh = () => client(env.BOT_PAT, REPO);
+const ro = () => client(env.READ_TOKEN || env.BOT_PAT, REPO);
+
+const NUDGE_AFTER_MIN = 15;          // no Codex verdict for the head after this -> "@codex review" once
+const WORK_IDLE_MIN = 75;            // implementing/fixing without result
+const REVIEW_IDLE_MIN = 120;         // reviewing without verdict even after nudge
+const SELF_CHECKS = ["advance", "work", "publish"];
+
+const now = () => new Date().toISOString();
+const SW = () => C.readSwitches(env);
+const minutesSince = (iso) => (iso ? (Date.now() - Date.parse(iso)) / 60000 : Infinity);
+const log = (...a) => console.log("[orch]", ...a);
+
+function setOutput(key, value) {
+  const v = String(value ?? "");
+  if (!env.GITHUB_OUTPUT) return log(`output ${key}=${v.slice(0, 200)}`);
+  const delim = `ORCH_${Math.random().toString(36).slice(2)}`;
+  fs.appendFileSync(env.GITHUB_OUTPUT, `${key}<<${delim}\n${v}\n${delim}\n`);
+}
+
+function git(...args) {
+  return execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+}
+
+// ---------------------------------------------------------------- notifications
+
+async function notify(title, message, url) {
+  if (!env.NTFY_TOPIC) return;
+  try {
+    await fetch("https://ntfy.sh", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ topic: env.NTFY_TOPIC, title, message: C.oneLine(message, 900), click: url }),
+    });
+  } catch (e) {
+    log("notify failed", e.message);
+  }
+}
+
+// ---------------------------------------------------------------- run I/O
+
+async function loadRun(n, c = gh()) {
+  const issue = await c.get(`/issues/${n}`, { allow404: true });
+  if (!issue || issue.pull_request) return null;
+  const parsed = C.parsePlan(issue.body);
+  return {
+    n: Number(n),
+    issue,
+    plan: parsed.ok ? parsed.plan : null,
+    planError: parsed.ok ? null : parsed.error,
+    state: C.readState(issue.body),
+  };
+}
+
+async function save(run, patch, logLine) {
+  const state = { ...(run.state ?? { v: 1 }), ...patch, v: 1, updatedAt: now() };
+  const body = C.composeBody(run.issue.body, run.plan, state);
+  await gh().patch(`/issues/${run.n}`, { body });
+  run.state = state;
+  run.issue.body = body;
+  if (logLine) await comment(run.n, logLine);
+  return state;
+}
+
+const comment = (num, text) => gh().post(`/issues/${num}/comments`, { body: `${C.LOG_MARK}\n${text}` });
+
+async function ensureLabels() {
+  const colors = { "orch:go": "0e8a16", "orch:cancel": "b60205", "orch:run": "1d76db", "orch:blocked": "d93f0b", "orch:done": "5319e7" };
+  for (const [name, color] of Object.entries(colors)) {
+    try {
+      await gh().post("/labels", { name, color });
+    } catch (e) {
+      if (e.status !== 422) throw e; // 422 = already exists
+    }
+  }
+}
+
+async function setLabels(n, add = [], remove = []) {
+  if (add.length) await gh().post(`/issues/${n}/labels`, { labels: add });
+  for (const l of remove) {
+    try {
+      await gh().del(`/issues/${n}/labels/${encodeURIComponent(l)}`);
+    } catch (e) {
+      if (e.status !== 404) throw e;
+    }
+  }
+}
+
+/** Hold new work while switches forbid it. Logs once per distinct reason. */
+async function holdWork(run, mode, reason) {
+  const prev = run.state?.held;
+  if (prev?.mode === mode && prev?.reason === reason) return;
+  await save(run, { held: { mode, reason, since: now() } },
+    `⏸️ 대기 (Step ${run.state?.step ?? "-"}): ${reason}. 스위치가 다시 켜지면 자동으로 이어갑니다.`);
+}
+
+/** Claude hit the subscription usage limit: wait until it resets, then resume automatically (no block). */
+async function holdUntilLimit(run, mode, until) {
+  // Codex can develop while Claude is limited: hand the same step over instead of waiting.
+  if (C.pickImpl({ claudeLimitedUntil: until }, SW()) === "codex") {
+    await save(run, { claudeLimitedUntil: until, held: null, requestedAt: now() },
+      `🔀 Step ${run.state?.step ?? "-"}: Claude 사용량 한도(${C.kst(until)}까지) → Codex가 이어서 ${mode === "fix" ? "수정" : "구현"}합니다.`);
+    await dispatchWork(run, mode);
+    return;
+  }
+  await save(run, { claudeLimitedUntil: until, held: { mode, reason: "Claude 사용량 한도", since: now(), until } },
+    `⏸️ 대기 (Step ${run.state?.step ?? "-"}): Claude 사용량 한도. ${C.kst(until)}에 한도가 풀리면 자동으로 이어갑니다.`);
+  await ro().post("/actions/workflows/wait.yml/dispatches", { ref: "main", inputs: { until, issue: String(run.n) } });
+}
+
+async function releaseHold(run) {
+  if (!run.state?.held) return;
+  const was = run.state.held;
+  await save(run, { held: null, requestedAt: now() }, `▶️ 대기 해제: ${was.reason} → 작업을 이어갑니다.`);
+}
+
+/** Dispatch implement/fix work unless the ON/OFF switches hold it. Returns true if dispatched. */
+async function dispatchWork(run, mode) {
+  const sw = SW();
+  const impl = C.pickImpl(run.state, sw);
+  // Waiting for a Claude usage limit to lift: keep the hold until its reset time (wait.yml wakes the watchdog then),
+  // unless Codex can take the work now.
+  const until = run.state?.held?.until;
+  if (impl === "claude" && until && Date.parse(until) > Date.now()) return false;
+  const pick = C.pickModel(run.plan, run.state.step, mode === "implement" ? 0 : run.state.retries ?? 0);
+  const hold = C.gateReason(sw) ?? (impl === "codex" ? null : C.resolveModel(pick, sw).hold ?? null);
+  if (hold) {
+    await holdWork(run, mode, hold);
+    return false;
+  }
+  await releaseHold(run);
+  await ro().post("/actions/workflows/claude-work.yml/dispatches", {
+    ref: "main",
+    inputs: { issue: String(run.n), mode, step: String(run.state.step), ...(impl === "codex" ? { impl } : {}) },
+  });
+  return true;
+}
+
+/** "@codex review" only while Codex is ON (when OFF its verdicts are ignored anyway). */
+async function askCodex(prNumber) {
+  if (SW().codex) await gh().post(`/issues/${prNumber}/comments`, { body: "@codex review" });
+}
+
+async function block(run, reason, url, kind = "work") {
+  await save(
+    run,
+    { status: "blocked", reason, blockKind: kind },
+    `⛔ **중단** (Step ${run.state?.step ?? "-"}): ${reason}${url ? `\n${url}` : ""}\n\n` +
+      "원인을 해결한 뒤 `orch:go` 라벨을 다시 붙이면 재개합니다. 취소하려면 `orch:cancel` 라벨을 붙이세요.",
+  );
+  await setLabels(run.n, [C.LABELS.blocked], []);
+  await notify(`⛔ Run #${run.n} 중단`, `${run.plan?.goal ?? ""} — ${reason}`, run.issue.html_url);
+  // Auto mode: Codex PM looks at it right away (pm-unblock.yml), instead of waiting for the hourly Claude PM check.
+  const sw = SW();
+  if (sw.auto && sw.codex && kind !== "final") {
+    await ro().post("/actions/workflows/pm-unblock.yml/dispatches", { ref: "main", inputs: { issue: String(run.n) } })
+      .catch((e) => log(`pm-unblock dispatch failed: ${e.message}`));
+  }
+}
+
+// ---------------------------------------------------------------- start / resume / cancel
+
+async function start(run, sender) {
+  if (run.issue.user.login !== OWNER || sender !== OWNER) {
+    log(`ignored: issue author ${run.issue.user.login}, sender ${sender}, owner ${OWNER}`);
+    return;
+  }
+  await ensureLabels();
+  await setLabels(run.n, [], [C.LABELS.go]);
+  if (!run.plan) {
+    await comment(run.n, `❌ 계획을 읽을 수 없어 시작하지 않았습니다: ${run.planError}`);
+    return;
+  }
+  const st = run.state;
+  if (st && ["implementing", "reviewing", "fixing", "finalizing"].includes(st.status)) {
+    await comment(run.n, `ℹ️ 이미 진행 중입니다 (${st.status}, Step ${st.step}).`);
+    return;
+  }
+  if (st?.status === "awaiting_merge") {
+    await comment(run.n, `ℹ️ 모든 스텝이 끝나 최종 PR #${st.finalPr} 반영(Merge)을 기다리고 있습니다.`);
+    return;
+  }
+
+  // Resume from blocked
+  if (st?.status === "blocked" && st.blockKind === "final") {
+    // A low-risk run that only stopped on a main conflict goes back to the automatic path once the conflict is gone.
+    const auto = st.risk === "low" && run.plan.auto_merge !== false && /충돌/.test(st.reason ?? "");
+    await save(run, { status: auto ? "finalizing" : "awaiting_merge", reason: null },
+      auto ? `▶️ 충돌이 풀려 자동 반영 경로로 돌아갑니다. 최종 PR #${st.finalPr}의 CI가 통과하면 반영합니다.`
+        : `▶️ 자동 반영을 멈추고 사용자 반영 대기로 바꿨습니다. 최종 PR #${st.finalPr}을 확인해 주세요.`);
+    await setLabels(run.n, [C.LABELS.run], [C.LABELS.blocked]);
+    if (auto) await watchOne(run.n);
+    return;
+  }
+  if (st?.status === "blocked") {
+    const pr = st.pr ? await gh().get(`/pulls/${st.pr}`, { allow404: true }) : null;
+    if (st.blockKind === "review" && pr?.state === "open") {
+      await save(run, { status: "reviewing", reason: null, reviewRequestedAt: now(), nudged: [pr.head.sha], claudeReviewFor: null },
+        `▶️ 재개: PR #${pr.number} 재검증을 요청했습니다.`);
+      await askCodex(pr.number);
+    } else {
+      if (pr?.state === "open") {
+        await gh().post(`/issues/${pr.number}/comments`, { body: `${C.LOG_MARK}\n재개로 이 스텝을 처음부터 다시 구현하므로 PR을 닫습니다.` });
+        await gh().patch(`/pulls/${pr.number}`, { state: "closed" });
+      }
+      await save(run, { status: "implementing", attempt: (st.attempt ?? 1) + 1, retries: 0, pr: null, reason: null, requestedAt: now(), redispatchedAt: null },
+        `▶️ 재개: Step ${st.step}을 새로 구현합니다 (시도 ${(st.attempt ?? 1) + 1}).`);
+      await dispatchWork(run, "implement");
+    }
+    await setLabels(run.n, [C.LABELS.run], [C.LABELS.blocked]);
+    return;
+  }
+
+  // Fresh start
+  const main = await gh().get("/git/ref/heads/main");
+  try {
+    await gh().post("/git/refs", { ref: `refs/heads/${C.runBranch(run.n)}`, sha: main.object.sha });
+  } catch (e) {
+    if (e.status !== 422) throw e; // already exists -> reuse
+  }
+  await save(
+    run,
+    { v: 1, status: "implementing", step: 1, attempt: 1, retries: 0, pr: null, finalPr: null, passed: {}, startedAt: now(), requestedAt: now(), reason: null },
+    `🚀 시작: ${run.plan.steps.length}개 스텝, 통합 브랜치 \`${C.runBranch(run.n)}\`. Step 1 구현을 Claude에게 맡겼습니다.`,
+  );
+  await setLabels(run.n, [C.LABELS.run], [C.LABELS.blocked, C.LABELS.done]);
+  await dispatchWork(run, "implement");
+}
+
+async function cancel(run, sender, why) {
+  if (sender && sender !== OWNER) return;
+  const st = run.state;
+  if (!st || ["cancelled", "done"].includes(st.status)) return;
+  if (st.pr) {
+    const pr = await gh().get(`/pulls/${st.pr}`, { allow404: true });
+    if (pr?.state === "open") await gh().patch(`/pulls/${pr.number}`, { state: "closed" });
+  }
+  await save(run, { status: "cancelled", reason: why }, `🚫 취소: ${why}`);
+  await setLabels(run.n, [], [C.LABELS.run, C.LABELS.go, C.LABELS.cancel]);
+}
+
+// ---------------------------------------------------------------- review evaluation
+
+async function evaluatePR(prNumber, { reviewRunFailed = false } = {}) {
+  const pr = await gh().get(`/pulls/${prNumber}`, { allow404: true });
+  if (!pr || pr.state !== "open" || pr.user.login !== OWNER) return;
+  const link = C.parsePrMarker(pr.body);
+  if (!link) {
+    const finalOf = C.parseFinalMarker(pr.body);
+    return finalOf ? evaluateFinal(pr, finalOf, { reviewRunFailed }) : undefined;
+  }
+  const run = await loadRun(link.issue);
+  const st = run?.state;
+  if (!run?.plan || !st || st.status !== "reviewing" || st.pr !== pr.number || st.step !== link.step) {
+    log(`PR #${prNumber}: not the active review (state=${st?.status} pr=${st?.pr})`);
+    return;
+  }
+  const comments = await gh().all(`/issues/${pr.number}/comments`);
+  const codex = C.codexVerdict(comments, pr.head.sha);
+  const ci = C.ciVerdict(await ro().all(`/commits/${pr.head.sha}/check-runs`), SELF_CHECKS);
+
+  // Codex OFF or unavailable (e.g. usage limit) -> independent Claude (Opus) review in a separate workflow.
+  const sw = SW();
+  let route = C.reviewRoute(sw, codex.result === "error");
+  // Codex wrote this step: Claude reviews it when Claude is available (independent reviewer); while Claude is
+  // usage-limited the Codex review app (a separate session) reviews it so the night does not stop.
+  if (st.impl === "codex" && sw.opus && !C.claudeLimited(st)) route = "claude";
+  if (!route) {
+    await holdWork(run, "review", "검수할 수 있는 AI가 없음 (Codex OFF 또는 사용 불가 + Opus OFF)");
+    return { run, pr, codex, fallback: true, held: true };
+  }
+  // Release a review hold once a reviewer is available and nothing new needs dispatching.
+  if (st.held?.mode === "review" && (route === "codex" || st.claudeReviewFor === pr.head.sha)) await releaseHold(run);
+  let review = codex;
+  if (route === "claude") {
+    const why = st.impl === "codex" ? "Codex가 구현한 스텝이라 독립 검수를 위해" : sw.codex ? `Codex 리뷰를 쓸 수 없어(status=${codex.status})` : "Codex가 OFF라";
+    const cr = C.claudeReviewVerdict(comments, pr.head.sha);
+    log(`PR #${pr.number}: codex=${sw.codex ? codex.result : "off"} -> claude review ${cr.result}`);
+    if (cr.result === "none") {
+      if (reviewRunFailed && st.claudeReviewFor === pr.head.sha) {
+        return block(run, "Claude 대체 검수 워크플로가 판정 없이 실패했습니다.", pr.html_url, "review");
+      }
+      if (st.claudeReviewFor !== pr.head.sha) {
+        const gate = C.gateReason(sw);
+        if (gate) {
+          await holdWork(run, "review", gate);
+          return { run, pr, codex, fallback: true, held: true };
+        }
+        await releaseHold(run);
+        await ro().post("/actions/workflows/claude-review.yml/dispatches", {
+          ref: "main",
+          inputs: { issue: String(run.n), pr: String(pr.number), sha: pr.head.sha },
+        });
+        await save(run, { claudeReviewFor: pr.head.sha, reviewRequestedAt: now() },
+          `🔁 ${why} Claude(Opus) 대체 검수를 요청했습니다 (PR #${pr.number}).`);
+      }
+      return { run, pr, codex, fallback: true };
+    }
+    if (cr.result === "error") return block(run, "Claude 대체 검수가 판정을 내지 못했습니다.", cr.url ?? pr.html_url, "review");
+    review = cr;
+  }
+
+  const d = C.decide(review, ci, { requireCi: env.REQUIRE_CI !== "false" });
+  log(`PR #${pr.number} head ${pr.head.sha.slice(0, 7)}: review=${review.source ?? "codex"}:${review.result} ci=${ci.result} -> ${d.action}`);
+
+  if (d.action === "wait") return { run, pr, codex, fallback: review !== codex };
+  if (d.action === "block") return block(run, d.reason, codex.url ?? pr.html_url, "review");
+  if (d.action === "pass") return onPass(run, pr, review.source === "claude" ? "claude" : "codex");
+  return onFail(run, pr, d.reason);
+}
+
+const REVIEWER_TEXT = { codex: "Codex 지적 없음", claude: "Claude(Opus) 대체 검수 PASS" };
+const REVIEWER_SHORT = { codex: "Codex", claude: "Claude Opus (대체)" };
+const reviewerCell = (info) => (info.provisional ? "Codex (임시) → Claude 재검수" : REVIEWER_SHORT[info.reviewer] ?? "-");
+
+async function onPass(run, pr, reviewer = "codex") {
+  const reviewNote = REVIEWER_TEXT[reviewer];
+  const st = run.state;
+  const step = run.plan.steps.find((s) => s.id === st.step);
+  try {
+    await gh().put(`/pulls/${pr.number}/merge`, {
+      merge_method: "squash",
+      sha: pr.head.sha, // refuse if the head moved since we judged it
+      commit_title: `[run #${run.n}] Step ${step.id}: ${step.title} (#${pr.number})`,
+    });
+  } catch (e) {
+    const again = await gh().get(`/pulls/${pr.number}`);
+    const fresh = (await loadRun(run.n)).state;
+    if (again.merged_at && fresh?.step !== st.step) return log(`PR #${pr.number} already merged and handled`);
+    if (!again.merged_at) {
+      return block(run, `스텝 PR 합치기 실패 (${e.status}): ${C.oneLine(e.message, 200)}`, pr.html_url, "work");
+    }
+    log(`PR #${pr.number} merged by a concurrent run; continuing`);
+  }
+  const passed = { ...(st.passed ?? {}), [step.id]: pr.number };
+  // Codex built it and Codex reviewed it (Claude was limited): pass provisionally; Claude re-checks before main.
+  const provisional = st.impl === "codex" && reviewer === "codex";
+  const stepInfo = { ...(st.stepInfo ?? {}), [step.id]: { reviewer, retries: st.retries ?? 0, ...(st.impl ? { impl: st.impl } : {}), ...(provisional ? { provisional: true } : {}) } };
+  const total = run.plan.steps.length;
+
+  if (step.id < total) {
+    await save(run, { status: "implementing", step: step.id + 1, attempt: 1, retries: 0, pr: null, passed, stepInfo, impl: null, requestedAt: now(), redispatchedAt: null },
+      `✅ Step ${step.id} ${provisional ? "임시 통과" : "통과"} (#${pr.number}, ${reviewNote} + CI 통과${provisional ? ", Codex 구현·검수라 최종 반영 전 Claude 재검수" : ""}) → Step ${step.id + 1} 구현 시작`);
+    await dispatchWork(run, "implement");
+    return;
+  }
+
+  run.state = { ...st, passed, stepInfo };
+  return openFinal(run);
+}
+
+async function readPackageJson(ref) {
+  const f = await gh().get(`/contents/package.json?ref=${encodeURIComponent(ref)}`, { allow404: true });
+  if (!f?.content) return null;
+  try {
+    return JSON.parse(Buffer.from(f.content, "base64").toString("utf8"));
+  } catch {
+    return { __unparseable: true };
+  }
+}
+
+async function openFinal(run) {
+  const st = run.state;
+  const plan = run.plan;
+  const branch = C.runBranch(run.n);
+  const cmp = await gh().get(`/compare/main...${encodeURIComponent(branch)}`);
+  const files = cmp.files ?? [];
+  const deps = files.some((f) => f.filename === "package.json")
+    ? C.depDiff(await readPackageJson("main"), await readPackageJson(branch))
+    : [];
+  const risk = C.classifyRisk(files, deps);
+  // Auto mode (ORCH_AUTO): the owner delegated final approval, so every final PR merges itself after CI.
+  const auto = SW().auto;
+  const autoMerge = auto || (plan.auto_merge !== false && risk.level === "low");
+
+  const steps = [];
+  for (const s of plan.steps) {
+    const prNum = st.passed?.[s.id];
+    const prObj = prNum ? await gh().get(`/pulls/${prNum}`, { allow404: true }) : null;
+    let { summary, unmet } = C.extractSummary(prObj?.body);
+    if (!summary && prNum) {
+      const prFiles = await gh().get(`/pulls/${prNum}/files?per_page=100`, { allow404: true });
+      summary = C.filesSummary(prFiles);
+    }
+    const info = st.stepInfo?.[s.id] ?? {};
+    const usedModel = C.pickModel(plan, s.id, info.retries ?? 0).model;
+    steps.push({ id: s.id, title: s.title, pr: prNum, summary, unmet, model: usedModel, ecc: C.eccCell(prObj?.body), reviewer: reviewerCell(info), retries: info.retries ?? 0 });
+  }
+
+  const final = await gh().post("/pulls", {
+    title: `[orch] ${plan.goal}`,
+    head: branch,
+    base: "main",
+    body: C.finalReport({ n: run.n, plan, steps, risk, autoMerge }),
+  });
+
+  const recheck = plan.steps.filter((s) => st.stepInfo?.[s.id]?.provisional).map((s) => s.id);
+  if (recheck.length) {
+    await save(run, { status: "rechecking", pr: final.number, finalPr: final.number, risk: risk.level, riskReasons: risk.reasons, autoMerge, recheck, retries: 0, impl: null, claudeReviewFor: null },
+      `🔎 전체 ${plan.steps.length}개 스텝 통과. Step ${recheck.join(", ")}은 Codex가 만들고 검수한 임시 통과라, 최종 PR #${final.number}을 반영하기 전에 Claude(Opus)가 다시 검수합니다.`);
+    return evaluateRecheck(await loadRun(run.n), final);
+  }
+  return afterFinal(run, final, { autoMerge, risk, auto });
+}
+
+/** Final PR is open and needs no more review: auto-merge path or owner approval. */
+async function afterFinal(run, final, { autoMerge, risk, auto = SW().auto }) {
+  const plan = run.plan;
+  if (autoMerge) {
+    const why = auto && (risk.level !== "low" || plan.auto_merge === false)
+      ? `자동 모드 → 확인 필요 항목(${risk.reasons.map((r) => r.reason).join(", ") || "auto_merge: false"})도 완공 보고서에 남기고 자동 반영`
+      : "위험 낮음";
+    await save(run, { status: "finalizing", pr: null, finalPr: final.number, risk: risk.level },
+      `🎉 전체 ${plan.steps.length}개 스텝 통과. ${why} → 최종 PR #${final.number}의 CI가 통과하면 자동 반영합니다.`);
+    return;
+  }
+  const why = risk.reasons.length ? risk.reasons.map((r) => r.reason).join(", ") : "auto_merge: false";
+  await save(run, { status: "awaiting_merge", pr: null, finalPr: final.number, risk: risk.level },
+    `🟡 전체 ${plan.steps.length}개 스텝 통과. **확인 필요** (${why}) → 최종 PR #${final.number}의 완공 보고서를 보고 반영해 주세요 (PR의 Merge 버튼).`);
+  await notify(`🟡 Run #${run.n} 승인 필요`, `${plan.goal} — ${why}. 최종 PR #${final.number}`, final.html_url);
+}
+
+/**
+ * Claude re-check of provisional (Codex-built + Codex-reviewed) steps on the final PR. Waits while Claude is still
+ * usage-limited; FAIL goes through the normal fix loop on the run branch (max_retries), PASS continues to merge.
+ */
+async function evaluateRecheck(run, pr, { reviewRunFailed = false } = {}) {
+  const st = run.state;
+  const sw = SW();
+  if (C.claudeLimited(st)) {
+    if (!st.held?.until) {
+      await save(run, { held: { mode: "recheck", reason: "Claude 사용량 한도", since: now(), until: st.claudeLimitedUntil } },
+        `⏸️ Claude 재검수 대기: ${C.kst(st.claudeLimitedUntil)}에 Claude 한도가 풀리면 재검수합니다.`);
+      await ro().post("/actions/workflows/wait.yml/dispatches", { ref: "main", inputs: { until: st.claudeLimitedUntil, issue: String(run.n) } });
+    }
+    return;
+  }
+  const gate = C.gateReason(sw) ?? (sw.opus ? null : "Opus OFF (재검수는 Claude Opus가 함)");
+  if (gate) return holdWork(run, "recheck", gate);
+  await releaseHold(run);
+  const head = pr.head.sha;
+  const cr = C.claudeReviewVerdict(await gh().all(`/issues/${pr.number}/comments`), head);
+  if (cr.result === "none") {
+    if (reviewRunFailed && st.claudeReviewFor === head) return block(run, "Claude 재검수 워크플로가 판정 없이 실패했습니다.", pr.html_url, "review");
+    if (st.claudeReviewFor !== head) {
+      await ro().post("/actions/workflows/claude-review.yml/dispatches", { ref: "main", inputs: { issue: String(run.n), pr: String(pr.number), sha: head } });
+      await save(run, { claudeReviewFor: head, reviewRequestedAt: now() }, `🔁 Claude(Opus) 재검수를 요청했습니다 (최종 PR #${pr.number}).`);
+    }
+    return;
+  }
+  if (cr.result === "error") return block(run, "Claude 재검수가 판정을 내지 못했습니다.", cr.url ?? pr.html_url, "review");
+  if (cr.result === "pass") {
+    const info = { ...(st.stepInfo ?? {}) };
+    for (const id of st.recheck ?? []) info[id] = { ...info[id], provisional: false, reviewer: "claude" };
+    await save(run, { recheck: null, stepInfo: info, pr: null }, `✅ Claude 재검수 PASS (Step ${(st.recheck ?? []).join(", ")}).`);
+    const fresh = await loadRun(run.n);
+    await afterFinal(fresh, pr, { autoMerge: st.autoMerge !== false, risk: { level: st.risk ?? "low", reasons: st.riskReasons ?? [] } });
+    if (st.autoMerge !== false) return evaluateFinal(await gh().get(`/pulls/${pr.number}`), run.n);
+    return;
+  }
+  const max = run.plan.max_retries;
+  if ((st.retries ?? 0) >= max) return block(run, `Claude 재검수 ${st.retries + 1}회 연속 FAIL`, pr.html_url, "review");
+  await save(run, { status: "fixing", retries: (st.retries ?? 0) + 1, fixFrom: head, requestedAt: now() },
+    `🔁 Claude 재검수 FAIL → run 브랜치에서 수정합니다 (${(st.retries ?? 0) + 1}/${max}).`);
+  await dispatchWork(run, "fix");
+}
+
+/** Final PR (run branch -> main) of a low-risk run: merge once its CI passes. */
+/**
+ * Final PR conflicts with main (another run landed first). GitHub runs no CI on a conflicted PR, so without this the
+ * run waits forever. First time for a head: ask final-sync.yml to merge main in (it auto-resolves patch-note-only
+ * conflicts). If that fails or nothing changes within 15 minutes, stop and ask the user.
+ * @returns {Promise<boolean>} true when the caller must not proceed (conflict being handled or blocked)
+ */
+async function handleFinalConflict(run, pr) {
+  const fresh = pr.mergeable === undefined ? await gh().get(`/pulls/${pr.number}`) : pr;
+  if (fresh.mergeable !== false) return false;               // true = clean; null = GitHub still computing
+  const st = run.state, head = fresh.head.sha;
+  if (st.syncFor !== head) {
+    await save(run, { syncFor: head, syncAt: now() },
+      `🔀 최종 PR #${pr.number}이 main과 충돌합니다 (그사이 다른 작업이 반영됨). main을 합쳐 자동 정리를 시도합니다.`);
+    await ro().post(`/actions/workflows/final-sync.yml/dispatches`, { ref: "main", inputs: { issue: String(run.n), pr: String(pr.number) } });
+    return true;
+  }
+  const comments = await ro().all(`/issues/${pr.number}/comments?per_page=100`);
+  const failed = C.finalSyncResult(comments, head);
+  if (failed?.ok === false || minutesSince(st.syncAt) > 15) {
+    const files = failed?.files?.length ? ` (${failed.files.join(", ")})` : "";
+    await block(run, `최종 PR이 main과 충돌해 자동 정리하지 못했습니다${files}. 충돌을 풀고 orch:go를 다시 붙여 주세요.`, fresh.html_url, "final");
+  }
+  return true;
+}
+
+async function evaluateFinal(pr, n, opts = {}) {
+  const run = await loadRun(n);
+  const st = run?.state;
+  if (st?.status === "rechecking" && st.finalPr === pr.number) return evaluateRecheck(run, pr, opts);
+  if (!st || st.status !== "finalizing" || st.finalPr !== pr.number) return;
+  if (await handleFinalConflict(run, pr)) return;
+  const ci = C.ciVerdict(await ro().all(`/commits/${pr.head.sha}/check-runs`), SELF_CHECKS);
+  log(`final PR #${pr.number}: ci=${ci.result} mergeable=${pr.mergeable}`);
+  if (ci.result === "pending" || ci.result === "none") return;
+  if (ci.result === "failure") {
+    return block(run, `최종 PR CI 실패: ${ci.failed.map((f) => f.name).join(", ")} (main과 합쳤을 때 문제)`, pr.html_url, "final");
+  }
+  try {
+    await gh().put(`/pulls/${pr.number}/merge`, {
+      merge_method: "merge",
+      sha: pr.head.sha,
+      commit_title: `[orch] ${run.plan.goal} (#${pr.number})`,
+    });
+  } catch (e) {
+    const again = await gh().get(`/pulls/${pr.number}`);
+    if (!again.merged_at) {
+      return block(run, `최종 PR 자동 반영 실패 (${e.status}): ${C.oneLine(e.message, 200)}`, pr.html_url, "final");
+    }
+  }
+  const how = st.risk && st.risk !== "low" ? "자동 모드, CI 통과" : "위험 낮음, CI 통과";
+  await finishRun(run, `🏁 최종 PR #${pr.number}을 main에 자동 반영했습니다 (${how}). 완료!`);
+  await notify(`✅ Run #${run.n} 완료 (자동 반영)`, `${run.plan.goal}`, pr.html_url);
+}
+
+async function finishRun(run, line) {
+  await save(run, { status: "done" }, line);
+  await setLabels(run.n, [C.LABELS.done], [C.LABELS.run]);
+  if (run.issue.state === "open") await gh().patch(`/issues/${run.n}`, { state: "closed", state_reason: "completed" });
+  await dispatchNextPlan("run 완료");
+}
+
+/** Auto mode: ask plan-next for the next plan (it re-checks everything itself, so extra calls are harmless). */
+async function dispatchNextPlan(why) {
+  if (!SW().auto) return;
+  try {
+    await ro().post("/actions/workflows/plan-next.yml/dispatches", { ref: "main" });
+    log(`plan-next dispatched (${why})`);
+  } catch (e) {
+    log(`plan-next dispatch failed: ${e.message}`);
+  }
+}
+
+async function onFail(run, pr, reason) {
+  const st = run.state;
+  const max = run.plan.max_retries;
+  if ((st.retries ?? 0) >= max) {
+    return block(run, `검증 ${st.retries + 1}회 연속 실패 (${reason})`, pr.html_url, "work");
+  }
+  await save(run, { status: "fixing", retries: (st.retries ?? 0) + 1, fixFrom: pr.head.sha, requestedAt: now() },
+    `🔁 Step ${st.step} 검증 실패: ${reason}. Claude에게 수정을 맡겼습니다 (${(st.retries ?? 0) + 1}/${max}).`);
+  await dispatchWork(run, "fix");
+}
+
+// ---------------------------------------------------------------- watchdog
+
+async function watchdog() {
+  const issues = await gh().all(`/issues?labels=${encodeURIComponent(C.LABELS.run)}&state=open`);
+  for (const it of issues.filter((i) => !i.pull_request)) {
+    try {
+      await watchOne(it.number);
+    } catch (e) {
+      log(`watchdog #${it.number} error: ${e.message}`);
+    }
+  }
+  // Auto mode fallback: nothing running and no plan waiting → let plan-next decide (missed dispatch, cool-down over).
+  if (SW().auto && !issues.some((i) => !i.pull_request)) {
+    const open = await gh().all("/issues?state=open");
+    if (!open.some((i) => !i.pull_request && String(i.title ?? "").startsWith("[plan]"))) await dispatchNextPlan("순찰");
+  }
+}
+
+async function watchOne(n) {
+  let run = await loadRun(n);
+  const st = run?.state;
+  if (!st || !run.plan) return;
+
+  if (st.status === "reviewing" && st.pr) {
+    const r = await evaluatePR(st.pr);          // re-evaluate in case an event was missed
+    run = await loadRun(n);
+    if (run.state.status !== "reviewing" || !r || r.held) return;
+    const head = r.pr.head.sha;
+    const nudged = run.state.nudged ?? [];
+    if (!r.fallback && r.codex.result === "none" && minutesSince(run.state.reviewRequestedAt) > NUDGE_AFTER_MIN && !nudged.includes(head)) {
+      await askCodex(st.pr);
+      await save(run, { nudged: [...nudged, head] }, `🔔 ${NUDGE_AFTER_MIN}분 동안 Codex 판정이 없어 리뷰를 다시 요청했습니다 (PR #${st.pr}).`);
+      return;
+    }
+    if (minutesSince(run.state.updatedAt) > REVIEW_IDLE_MIN) {
+      await block(run, `${REVIEW_IDLE_MIN}분 동안 Codex/CI 판정이 없습니다.`, r.pr.html_url, "review");
+    }
+    return;
+  }
+
+  // Held by ON/OFF switches: retry the dispatch; nothing times out while held.
+  if (["implementing", "fixing"].includes(st.status) && st.held) {
+    await dispatchWork(run, st.held.mode === "fix" ? "fix" : st.status === "fixing" ? "fix" : "implement");
+    return;
+  }
+
+  if (st.status === "implementing" && minutesSince(st.requestedAt) > 10) {
+    const busy = [
+      ...(await ro().all("/actions/workflows/claude-work.yml/runs?status=in_progress")),
+      ...(await ro().all("/actions/workflows/claude-work.yml/runs?status=queued")),
+    ].some((w) => (w.display_title ?? "").includes(`#${n} `));
+    if (!busy && (await recoverPushedWork(run))) return;
+    // Work that finished without pushing anything for this request (e.g. it skipped on a stale read): dispatch once more.
+    if (!busy && !st.redispatchedAt) {
+      const done = await ro().get(`/actions/workflows/claude-work.yml/runs?status=completed&per_page=20`);
+      const mine = (done?.workflow_runs ?? []).find((w) => (w.display_title ?? "").includes(`#${n} implement step ${st.step}`) && Date.parse(w.created_at) >= Date.parse(st.requestedAt) - 60000);
+      if (mine) {
+        await save(run, { redispatchedAt: now() }, `♻️ Step ${st.step} 구현 실행이 결과 없이 끝나 한 번 더 맡깁니다.`);
+        await dispatchWork(run, "implement");
+        return;
+      }
+    }
+  }
+
+  if (["implementing", "fixing"].includes(st.status) && minutesSince(st.requestedAt) > WORK_IDLE_MIN) {
+    const active = await ro().all("/actions/workflows/claude-work.yml/runs?status=in_progress");
+    const queued = await ro().all("/actions/workflows/claude-work.yml/runs?status=queued");
+    if ([...active, ...queued].some((w) => (w.display_title ?? "").includes(`#${n} `))) return;
+    if (await recoverPushedWork(run)) return;
+    await block(run, `Claude 작업이 ${Math.round(minutesSince(st.requestedAt))}분째 결과가 없습니다.`, null, "work");
+    return;
+  }
+
+  // Auto mode switched on while a final PR waits for the owner: take the automatic path.
+  if (st.status === "awaiting_merge" && st.finalPr && SW().auto) {
+    const pr = await gh().get(`/pulls/${st.finalPr}`, { allow404: true });
+    if (pr?.state === "open" && !pr.merged_at) {
+      await save(run, { status: "finalizing" }, `🤖 자동 모드가 켜져 있어 최종 PR #${pr.number}을 CI 통과 후 자동 반영합니다.`);
+      return evaluateFinal(pr, n);
+    }
+  }
+
+  if (["finalizing", "rechecking"].includes(st.status) && st.finalPr) {
+    const pr = await gh().get(`/pulls/${st.finalPr}`, { allow404: true });
+    if (pr?.state === "open") return evaluateFinal(pr, n);
+  }
+
+  if (["awaiting_merge", "finalizing"].includes(st.status) && st.finalPr) {
+    const pr = await gh().get(`/pulls/${st.finalPr}`, { allow404: true });
+    if (st.status === "awaiting_merge" && pr?.state === "open" && !pr.merged_at && (await handleFinalConflict(run, pr))) return;
+    if (pr?.merged_at) {
+      await finishRun(run, `🏁 최종 PR #${pr.number}이 반영되어 완료 처리했습니다.`);
+    } else if (pr?.state === "closed") {
+      await save(run, { status: "cancelled", reason: "최종 PR이 반영 없이 닫힘" }, "🚫 최종 PR이 반영 없이 닫혀 run을 종료했습니다.");
+      await setLabels(n, [], [C.LABELS.run]);
+    }
+  }
+}
+
+// ---------------------------------------------------------------- event router (orchestrator.yml)
+
+async function onEvent() {
+  const name = env.GITHUB_EVENT_NAME;
+  const ev = JSON.parse(fs.readFileSync(env.GITHUB_EVENT_PATH, "utf8"));
+  log(`event ${name}/${ev.action ?? "-"}`);
+
+  if (name === "issues") {
+    const run = await loadRun(ev.issue.number);
+    if (!run) return;
+    if (ev.action === "labeled" && ev.label?.name === C.LABELS.go) return start(run, ev.sender?.login);
+    if (ev.action === "labeled" && ev.label?.name === C.LABELS.cancel) return cancel(run, ev.sender?.login, "orch:cancel 라벨");
+    if (ev.action === "closed") {
+      if (["awaiting_merge", "finalizing"].includes(run.state?.status)) return watchOne(run.n);
+      return cancel(run, ev.sender?.login, "Issue가 닫힘");
+    }
+    return;
+  }
+
+  if (name === "issue_comment") {
+    if (ev.issue?.pull_request && C.isTrustedCodex(ev.comment?.user)) return evaluatePR(ev.issue.number);
+    return;
+  }
+
+  if (name === "workflow_run") {
+    const wr = ev.workflow_run;
+    // With `run-name`, workflow_run.name is the run title ("claude-review #1 pr 2"); use the workflow's name.
+    const wf = ev.workflow?.name ?? wr.name;
+    if (wf === "claude-review") {
+      const m = /#(\d+) pr (\d+)/.exec(wr.display_title ?? "");
+      return m ? evaluatePR(Number(m[2]), { reviewRunFailed: wr.conclusion !== "success" }) : undefined;
+    }
+    if (wf === "claude-work") {
+      // The publish job handles normal results. This only catches a run cancelled before publish could act.
+      const m = /#(\d+) /.exec(wr.display_title ?? "");
+      if (!m || wr.conclusion === "success") return;
+      const run = await loadRun(m[1]);
+      const st = run?.state;
+      if (st && ["implementing", "fixing"].includes(st.status) && Date.parse(wr.created_at) >= Date.parse(st.requestedAt) - 60000) {
+        if (await recoverPushedWork(run)) return;
+        return block(run, `Claude 작업 워크플로가 ${wr.conclusion} 상태로 끝났습니다.`, wr.html_url, "work");
+      }
+      return;
+    }
+    for (const p of wr.pull_requests ?? []) await evaluatePR(p.number);
+    return;
+  }
+
+  if (name === "workflow_dispatch" && /^\d+$/.test(env.INPUT_PR ?? "")) {
+    return evaluatePR(Number(env.INPUT_PR), { reviewRunFailed: true });
+  }
+  // A closed orch/* PR (owner merge or close): run the watchdog now instead of waiting for the schedule,
+  // which GitHub delays or drops for hours. watchOne() re-reads live state, so a duplicate is a no-op.
+  if (["schedule", "workflow_dispatch", "pull_request_target", "push"].includes(name)) return watchdog();
+}
+
+// ---------------------------------------------------------------- claude-work: prepare / commit / publish
+
+function expectedStatus(mode) {
+  return mode === "fix" ? "fixing" : "implementing";
+}
+
+/**
+ * The orchestrator saves the Issue state and dispatches work right away; a read that follows immediately can still
+ * see the previous body (GitHub API read-after-write lag). Re-read a few times before deciding the work is stale.
+ */
+async function loadRunExpecting(n, ok, client, tries = Number(env.ORCH_READ_RETRIES ?? 4), waitMs = Number(env.ORCH_READ_WAIT_MS ?? 5000)) {
+  let run = null;
+  for (let i = 0; i < tries; i++) {
+    run = await loadRun(n, client);
+    if (ok(run)) return run;
+    if (i < tries - 1) { log(`state not ready (status=${run?.state?.status}); re-reading in ${waitMs / 1000}s`); await new Promise((r) => setTimeout(r, waitMs)); }
+  }
+  return run;
+}
+
+async function prepare() {
+  const n = Number(env.ISSUE), mode = env.MODE, step = Number(env.STEP);
+  const run = await loadRunExpecting(n, (r) => r?.plan && r.state?.status === expectedStatus(mode) && r.state.step === step);
+  const st = run?.state;
+  if (!run?.plan || !st || st.status !== expectedStatus(mode) || st.step !== step) {
+    log(`skip: state=${st?.status} step=${st?.step} (expected ${expectedStatus(mode)} step ${step})`);
+    setOutput("skip", "true");
+    return;
+  }
+
+  let branch, prompt;
+  if (mode === "implement") {
+    branch = C.stepBranch(n, step, st.attempt ?? 1);
+    git("fetch", "origin", C.runBranch(n));
+    git("checkout", "-B", branch, `origin/${C.runBranch(n)}`);
+    prompt = C.implementPrompt(run.plan, step);
+  } else {
+    const pr = await gh().get(`/pulls/${st.pr}`);
+    branch = pr.head.ref;
+    git("fetch", "origin", branch);
+    git("checkout", "-B", branch, `origin/${branch}`);
+    const head = pr.head.sha;
+    const inline = (await gh().all(`/pulls/${pr.number}/comments`))
+      .filter((c) => C.isTrustedCodex(c.user) && (c.commit_id === head || c.original_commit_id === head))
+      .map((c) => ({ path: c.path, line: c.line ?? c.original_line, body: c.body }));
+    const reviews = (await gh().all(`/pulls/${pr.number}/reviews`))
+      .filter((r) => C.isTrustedCodex(r.user) && r.commit_id === head)
+      .map((r) => r.body ?? "");
+    const cr = C.claudeReviewVerdict(await gh().all(`/issues/${pr.number}/comments`), head);
+    if (cr.result === "fail") {
+      inline.push(...cr.findings.map((f) => ({ path: f.path, line: f.line, body: f.body })));
+      if (cr.summary) reviews.push(`(Claude 대체 검수) ${cr.summary}`);
+    }
+    const ci = C.ciVerdict(await ro().all(`/commits/${head}/check-runs`), SELF_CHECKS);
+    prompt = C.fixPrompt(run.plan, step, {
+      round: st.retries, maxRetries: run.plan.max_retries, findings: inline, reviewBodies: reviews, ciFailed: ci.failed,
+    });
+  }
+
+  setOutput("skip", "false");
+  setOutput("branch", branch);
+  setOutput("start_sha", git("rev-parse", "HEAD"));
+  const impl = env.IMPL === "codex" ? "codex" : "claude";
+  setOutput("impl", impl);
+  fs.writeFileSync(path.join(env.RUNNER_TEMP ?? ".", "work-prompt.md"), prompt);
+  // Same step failed review twice: Codex (read-only) diagnoses the root cause before the next fix.
+  const diagnose = mode === "fix" && (st.retries ?? 0) >= 2;
+  setOutput("diagnose", diagnose ? "true" : "false");
+  if (diagnose) fs.writeFileSync(path.join(env.RUNNER_TEMP ?? ".", "diag-prompt.md"), C.diagnosePrompt(prompt));
+  if (impl === "codex") {
+    log("implementer: codex (Claude usage limit)");
+    setOutput("model_args", "");
+    setOutput("model", "codex (Claude 사용량 한도로 대체)");
+    setOutput("prompt", prompt);
+    return;
+  }
+  // Already dispatched: switches turned off since then do not stop it (drain); only swap a model that is OFF.
+  const picked = C.pickModel(run.plan, step, mode === "implement" ? 0 : st.retries ?? 0);
+  const resolved = C.resolveModel(picked, SW());
+  const pick = resolved.hold ? picked : resolved;
+  log(`model: ${pick.model} (${pick.why})`);
+  setOutput("model_args", `--model ${pick.model}`);
+  setOutput("model", `${pick.model} (${pick.why})`);
+  setOutput("prompt", prompt);
+}
+
+function readNote(file) {
+  try {
+    return fs.readFileSync(path.join(".orch", file), "utf8").trim();
+  } catch {
+    return "";
+  }
+}
+
+async function commitAndPush() {
+  const branch = env.BRANCH, startSha = env.START_SHA, n = env.ISSUE, step = env.STEP;
+  const blocked = readNote("BLOCKED.md");
+  const summary = readNote("SUMMARY.md");
+  fs.rmSync(".orch", { recursive: true, force: true });
+  setOutput("summary", summary.slice(0, 6000));
+
+  if (blocked) {
+    setOutput("blocked", blocked.slice(0, 1500));
+    setOutput("changed", "false");
+    return;
+  }
+
+  git("add", "-A");
+  const staged = git("diff", "--cached", "--name-only");
+  const claudeCommitted = git("rev-parse", "HEAD") !== startSha;
+  // The summary also goes into the commit message, so a recovery path can rebuild the PR body.
+  const message = `Run #${n} step ${step}: ${env.MODE === "fix" ? "address review findings" : "implement"}${summary ? `\n\n${summary}` : ""}`;
+  if (staged) git("commit", "-m", message);
+  else if (claudeCommitted && summary) git("commit", "--allow-empty", "-m", message);
+
+  const changedFiles = git("diff", "--name-only", `${startSha}..HEAD`).split("\n").filter(Boolean);
+  const prot = C.touchesProtected(changedFiles);
+  if (prot.length) {
+    setOutput("blocked", `보호 경로를 수정해 푸시하지 않았습니다: ${prot.join(", ")}`);
+    setOutput("changed", "false");
+    return;
+  }
+  if (changedFiles.length === 0) {
+    setOutput("changed", "false");
+    return;
+  }
+  // claude-code-action rewrites the checkout's git credentials, so push with an explicit token URL.
+  // (BOT_PAT is a registered secret, so Actions masks it in any log output.)
+  const url = env.BOT_PAT ? `https://x-access-token:${env.BOT_PAT}@github.com/${REPO}.git` : "origin";
+  git("push", url, `HEAD:refs/heads/${branch}`);
+  setOutput("changed", "true");
+}
+
+async function resolveCodexThreads(prNumber) {
+  const [owner, name] = REPO.split("/");
+  const data = await gh().graphql(
+    `query($owner:String!,$name:String!,$pr:Int!){repository(owner:$owner,name:$name){pullRequest(number:$pr){
+      reviewThreads(first:100){nodes{id isResolved comments(first:1){nodes{author{login}}}}}}}}`,
+    { owner, name, pr: prNumber },
+  );
+  const threads = data.repository.pullRequest.reviewThreads.nodes.filter(
+    (t) => !t.isResolved && (t.comments.nodes[0]?.author?.login ?? "").startsWith("chatgpt-codex-connector"),
+  );
+  for (const t of threads) {
+    await gh().graphql(`mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{id}}}`, { id: t.id });
+  }
+  return threads.length;
+}
+
+async function openStepPR(run, branch, summary, note = "", tools = env.TOOLS ?? "") {
+  const step = run.state.step;
+  const step0 = run.plan.steps.find((s) => s.id === step);
+  const pr = await gh().post("/pulls", {
+    title: `[run #${run.n}] Step ${step}: ${step0.title}`,
+    head: branch,
+    base: C.runBranch(run.n),
+    body: C.prBody(run.n, run.plan, step, summary, tools, env.MODEL ?? ""),
+  });
+  await save(run, { status: "reviewing", pr: pr.number, reviewRequestedAt: now(), nudged: [] },
+    `📝 Step ${step} PR #${pr.number}을 열었습니다${note}. Codex 리뷰와 CI를 기다립니다.`);
+  return pr;
+}
+
+/**
+ * Recovery for implement work that was pushed but never published (e.g. the publish job was lost).
+ * Returns true if a PR was opened (or already exists) for the current step branch.
+ */
+async function recoverPushedWork(run) {
+  const st = run.state;
+  if (st.status !== "implementing") return false;
+  const branch = C.stepBranch(run.n, st.step, st.attempt ?? 1);
+  const ref = await gh().get(`/git/ref/heads/${encodeURIComponent(branch)}`, { allow404: true });
+  if (!ref) return false;
+  const cmp = await gh().get(`/compare/${encodeURIComponent(C.runBranch(run.n))}...${encodeURIComponent(branch)}`);
+  if (!cmp.ahead_by) return false;
+  const [owner] = REPO.split("/");
+  const open = await gh().get(`/pulls?state=open&head=${encodeURIComponent(`${owner}:${branch}`)}`);
+  if (open.length) {
+    await save(run, { status: "reviewing", pr: open[0].number, reviewRequestedAt: now(), nudged: [] },
+      `♻️ Step ${st.step} PR #${open[0].number}을 찾아 검증 단계로 이어갑니다.`);
+    return true;
+  }
+  const last = cmp.commits?.at(-1)?.commit?.message ?? "";
+  const summary = last.includes("\n\n") ? last.slice(last.indexOf("\n\n") + 2) : "";
+  await openStepPR(run, branch, summary, " (구현 결과를 복구해서)");
+  return true;
+}
+
+async function publish() {
+  if (env.SKIP === "true") return log("prepare skipped; nothing to publish");
+  const n = Number(env.ISSUE), mode = env.MODE, step = Number(env.STEP);
+  const run = await loadRun(n);
+  const st = run?.state;
+  if (!run?.plan || !st || st.status !== expectedStatus(mode) || st.step !== step) {
+    return log(`state moved on (${st?.status}); not publishing`);
+  }
+  if (env.WORK_RESULT !== "success") {
+    const until = env.LIMIT_UNTIL;
+    if (until && Date.parse(until) > Date.now()) return holdUntilLimit(run, mode, until);
+    return block(run, `Claude 작업 실행이 실패했습니다 (${env.WORK_RESULT}).`, RUN_URL, "work");
+  }
+  if (env.BLOCKED) return block(run, `Claude 중단 보고: ${C.oneLine(env.BLOCKED, 600)}`, RUN_URL, "work");
+  if (env.CHANGED !== "true") {
+    return block(run, mode === "fix" ? "수정 요청을 받았지만 새 커밋이 없습니다." : "변경 사항 없이 끝났습니다.", RUN_URL, "work");
+  }
+
+  if (env.IMPL) await save(run, { impl: env.IMPL });   // who wrote this step (review goes to the other AI when possible)
+  if (mode === "implement") return openStepPR(run, env.BRANCH, env.SUMMARY);
+
+  if (st.recheck?.length) {
+    if (env.SUMMARY || env.MODEL) await gh().post(`/issues/${st.pr}/comments`, { body: `${C.LOG_MARK}\n**재검수 수정 ${st.retries}회차 반영**${env.MODEL ? ` · 구현 모델: ${env.MODEL}` : ""}\n\n${env.SUMMARY ?? ""}` });
+    await save(run, { status: "rechecking", reviewRequestedAt: now() }, `🔍 재검수 지적을 고쳐 푸시했습니다. Claude가 다시 검수합니다 (최종 PR #${st.pr}).`);
+    const pr = await gh().get(`/pulls/${st.pr}`);
+    return evaluateRecheck(await loadRun(n), pr);
+  }
+  const resolved = await resolveCodexThreads(st.pr).catch((e) => (log("resolve threads failed", e.message), 0));
+  if (env.SUMMARY || env.TOOLS || env.MODEL) await gh().post(`/issues/${st.pr}/comments`, { body: `${C.LOG_MARK}\n**수정 ${st.retries}회차 반영**${env.MODEL ? ` · 구현 모델: ${env.MODEL}` : ""}\n\n${env.SUMMARY ?? ""}${env.TOOLS ? `\n\n### 도구 사용 (자동 기록)\n${env.TOOLS}` : ""}` });
+  await askCodex(st.pr);
+  await save(run, { status: "reviewing", reviewRequestedAt: now(), nudged: [] },
+    `🔍 Step ${step} 수정 커밋을 푸시하고 재검증을 요청했습니다 (PR #${st.pr}, 기존 Codex 스레드 ${resolved}건 resolve).`);
+}
+
+// ---------------------------------------------------------------- main
+
+// ---------------------------------------------------------------- claude-review: prepare / publish
+// Runs with the workflow GITHUB_TOKEN only (no owner PAT): reads the plan, posts one verdict comment.
+
+async function reviewPrepare() {
+  const n = Number(env.ISSUE), prNumber = Number(env.PR), sha = env.SHA;
+  const run = await loadRun(n, ro());
+  const st = run?.state;
+  const pr = await ro().get(`/pulls/${prNumber}`, { allow404: true });
+  const recheck = st?.status === "rechecking" && st.finalPr === prNumber;
+  if (!run?.plan || !st || (st.status !== "reviewing" && !recheck) || st.pr !== prNumber || pr?.head.sha !== sha) {
+    log(`skip review: state=${st?.status} pr=${st?.pr} head=${pr?.head.sha?.slice(0, 7)}`);
+    setOutput("skip", "true");
+    return;
+  }
+  setOutput("skip", "false");
+  setOutput("prompt", recheck ? C.recheckPrompt(run.plan, st.recheck ?? [], `origin/${pr.base.ref}`) : C.reviewPrompt(run.plan, st.step, `origin/${pr.base.ref}`));
+}
+
+async function reviewPublish() {
+  if (env.SKIP === "true") return;
+  const sha = env.SHA;
+  let parsed = null;
+  try {
+    parsed = env.CLAUDE_OUTCOME === "success" ? C.parseReviewFile(fs.readFileSync(".orch/REVIEW.json", "utf8")) : null;
+  } catch { parsed = null; }
+  const verdict = parsed?.verdict ?? "ERROR";
+  const summary = parsed?.summary ?? `검수 결과 파일이 없거나 형식이 잘못되었습니다 (Claude 실행 결과: ${env.CLAUDE_OUTCOME}).`;
+  await ro().post(`/issues/${env.PR}/comments`, {
+    body: C.claudeReviewComment({ sha, verdict, summary, findings: parsed?.findings ?? [], runUrl: RUN_URL, tools: env.TOOLS ?? "" }),
+  });
+  log(`claude review ${verdict} for ${sha.slice(0, 7)}`);
+}
+
+export const commands = { event: onEvent, prepare, commit: commitAndPush, publish, watchdog, "review-prepare": reviewPrepare, "review-publish": reviewPublish };
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const cmd = process.argv[2];
+  if (!commands[cmd]) {
+    console.error(`usage: main.mjs ${Object.keys(commands).join("|")}`);
+    process.exit(2);
+  }
+  commands[cmd]().catch(async (e) => {
+    console.error(e);
+    await notify("⚠️ orchestrator 오류", `${cmd}: ${e.message}`, RUN_URL);
+    process.exit(1);
+  });
+}
