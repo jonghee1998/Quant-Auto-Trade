@@ -47,6 +47,7 @@ def plan(env: dict, today: date, days: int, kr_have: set[tuple[str, str]] | None
         for q in U.KR_NEWS_QUERIES:
             jobs.append(("naver", q, lambda f, q=q: S.naver_news(f, q, env["NAVER_CLIENT_ID"], env["NAVER_CLIENT_SECRET"]), "news"))
     if env.get("FINNHUB_TOKEN"):
+        jobs.append(("finnhub", "market", lambda f: S.finnhub_market_news(f, env["FINNHUB_TOKEN"]), "news"))
         for t in U.US_NEWS_TICKERS:
             jobs.append(("finnhub", t, lambda f, t=t: S.finnhub_news(f, t, today - timedelta(days=2), today, env["FINNHUB_TOKEN"]), "news"))
     if env.get("SEC_USER_AGENT"):

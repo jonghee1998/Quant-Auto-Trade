@@ -163,6 +163,21 @@ def google_news(fetch: Fetch, query: str) -> list[dict]:
     return rows
 
 
+def finnhub_market_news(fetch: Fetch, token: str) -> list[dict]:
+    """시장 전체 뉴스(Finnhub general). 종목 뉴스와 달리 개별 기업 홍보 기사가 거의 없다 → 홈 미국 뉴스의 기본."""
+    data = get_json(fetch, "https://finnhub.io/api/v1/news", {"category": "general"},
+                    {"X-Finnhub-Token": token}, source="finnhub")
+    rows = []
+    for it in data or []:
+        url = it.get("url")
+        if not url or not it.get("headline") or not it.get("datetime"):
+            continue
+        rows.append({"url_hash": url_hash(url), "url": url, "title": it["headline"].strip(), "publisher": it.get("source"),
+                     "published_at": datetime.fromtimestamp(int(it["datetime"]), timezone.utc).isoformat(),
+                     "tickers": [], "source": "finnhub_market"})
+    return rows
+
+
 def finnhub_news(fetch: Fetch, symbol: str, start: date, end: date, token: str) -> list[dict]:
     data = get_json(fetch, "https://finnhub.io/api/v1/company-news",
                     {"symbol": symbol, "from": start.isoformat(), "to": end.isoformat()},
