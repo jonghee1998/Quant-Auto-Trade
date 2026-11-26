@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 import html
 import re
@@ -48,18 +48,30 @@ def tiingo_daily(fetch: Fetch, ticker: str, start: date, end: date, token: str) 
 
 
 # ---------------------------------------------------------------- 매크로·VIX: FRED
+FRED_DAILY = {"VIXCLS", "VXVCLS", "DEXKOUS", "DGS10", "DGS2", "T10Y2Y", "T10Y3M", "DFF", "BAMLH0A0HYM2"}
+
+
 def fred_series(fetch: Fetch, series: str, start: date, api_key: str) -> list[dict]:
-    """release_date = 그 값이 처음 공개된 날(realtime_start). 백테스트는 이 날짜 이후에만 쓴다."""
+    """release_date = 그 값이 처음 공개된 날. 백테스트는 이 날짜 이후에만 쓴다.
+
+    ALFRED '처음 발표된 값만'(output_type=4)으로 받아 정정 전 값과 첫 발표일을 쓴다.
+    빈티지 기록이 없는 시리즈는 realtime_start가 실제 발표일이 아니라(수년 뒤) → 일간 시리즈는 다음 날,
+    그 밖은 35일 뒤로 보수적으로 둔다.
+    """
     data = get_json(fetch, "https://api.stlouisfed.org/fred/series/observations",
-                    {"series_id": series, "observation_start": start.isoformat(),
-                     "api_key": api_key, "file_type": "json"}, source="fred")
+                    {"series_id": series, "observation_start": start.isoformat(), "api_key": api_key, "file_type": "json",
+                     "realtime_start": "1776-07-04", "realtime_end": "9999-12-31", "output_type": 4}, source="fred")
+    lag = timedelta(days=1 if series in FRED_DAILY else 35)
     rows = []
     for o in data.get("observations", []):
         v = _num(o.get("value"))
         if v is None:
             continue
-        rows.append({"series": series, "ref_date": o["date"], "release_date": o.get("realtime_start") or o["date"],
-                     "value": v, "source": "fred"})
+        ref = date.fromisoformat(o["date"])
+        rel = date.fromisoformat(o.get("realtime_start") or o["date"])
+        if rel < ref or (rel - ref).days > 60:
+            rel = ref + lag
+        rows.append({"series": series, "ref_date": o["date"], "release_date": rel.isoformat(), "value": v, "source": "fred"})
     return rows
 
 
