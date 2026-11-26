@@ -83,8 +83,31 @@ def universe_rows(px: pd.DataFrame, names: dict, kind: str, market: str) -> list
     return [{"code": c, "name": names[c], "kind": kind, "market": market, "r": [_f(r.loc[c, d]) for d in (21, 63, 126)]} for c in cols]
 
 
+KR_BENCH = "069500"  # KODEX 200 — 코스피200을 따르는 ETF(지수 API 전까지 한국 기준선)
+KR_EXCLUDE = ("레버리지", "인버스", "2X", "선물")  # 강한/약한 곳 목록을 배수·역방향 상품이 차지하지 않게
+
+
+def pick_kr(rows: pd.DataFrame, n_stock: int = 300, n_etf: int = 100) -> tuple[pd.DataFrame, dict, dict]:
+    """한국 전 종목(약 4천)에서 화면에 올릴 것만: 최근 20거래일 거래대금 상위 주식·ETF.
+    rows: code, name, kind(stock/etf), date, close, volume. 반환: (종가 표, 주식 이름, ETF 이름)."""
+    if rows.empty:
+        return pd.DataFrame(), {}, {}
+    rows = rows.assign(date=pd.to_datetime(rows["date"]))
+    recent = rows[rows["date"] >= rows["date"].drop_duplicates().nlargest(20).min()]
+    value = (recent["close"] * recent["volume"].fillna(0)).groupby(recent["code"]).mean()
+    meta = rows.drop_duplicates("code", keep="last").set_index("code")
+    def top(kind: str, n: int) -> dict:
+        codes = [c for c in value.sort_values(ascending=False).index if meta.at[c, "kind"] == kind
+                 and not (kind == "etf" and any(w in str(meta.at[c, "name"]) for w in KR_EXCLUDE))][:n]
+        return {c: meta.at[c, "name"] or c for c in codes}
+    stocks, etfs = top("stock", n_stock), top("etf", n_etf)
+    keep = set(stocks) | set(etfs) | {KR_BENCH}
+    px = rows[rows["code"].isin(keep)].pivot(index="date", columns="code", values="close").sort_index()
+    return px, stocks, etfs
+
+
 def build_payload(us_px: pd.DataFrame, macro: dict[str, pd.Series], news: list[dict], kr_px: pd.DataFrame | None = None,
-                  kr_names: dict | None = None, as_of: str | None = None) -> dict:
+                  kr_names: dict | None = None, as_of: str | None = None, kr_etf_names: dict | None = None) -> dict:
     quotes = []
     for qid, name, kind, src in QUOTE_DEFS:
         s = us_px[src] if kind == "etf" and src in us_px else macro.get(src, pd.Series(dtype=float))
@@ -96,8 +119,10 @@ def build_payload(us_px: pd.DataFrame, macro: dict[str, pd.Series], news: list[d
     universe = (universe_rows(us_px, U.SECTORS, "업종", "US") + universe_rows(us_px, U.US_STOCK_NAMES, "주식", "US")
                 + universe_rows(us_px, U.COUNTRIES, "나라", "W"))
     bench_kr = [None, None, None]
-    if kr_px is not None and kr_names:
-        universe += universe_rows(kr_px, kr_names, "주식", "KR")
+    if kr_px is not None and not kr_px.empty:
+        universe += universe_rows(kr_px, kr_etf_names or {}, "업종", "KR") + universe_rows(kr_px, kr_names or {}, "주식", "KR")
+        if KR_BENCH in kr_px:
+            bench_kr = [_ret(kr_px[KR_BENCH], d) for d in (21, 63, 126)]
     return {
         "asOf": as_of, "summary": summary_line(quotes), "quotes": quotes,
         "trendLight": {"state": light["state"], "gapPct": _f(light["gap_pct"])},
@@ -105,6 +130,14 @@ def build_payload(us_px: pd.DataFrame, macro: dict[str, pd.Series], news: list[d
         "universe": universe, "bench": {"US": bench_us, "W": bench_us, "KR": bench_kr},
         "news": [{"title": n["title"], "where": "한국" if n.get("source") == "naver" else "미국"} for n in news[:5]],
     }
+
+
+def load_kr(conn, days: int = 200) -> pd.DataFrame:
+    with conn.cursor() as cur:
+        cur.execute("""select i.code, i.name, i.kind, p.date, p.close * p.adj_factor, p.volume from prices_daily p
+                       join instruments i on i.id = p.instrument_id
+                       where i.market = 'KR' and p.date >= current_date - %s""", (days,))
+        return pd.DataFrame(cur.fetchall(), columns=["code", "name", "kind", "date", "close", "volume"])
 
 
 def load_from_db(conn, days: int = 400) -> tuple[pd.DataFrame, dict, list[dict]]:
@@ -143,9 +176,15 @@ def main() -> int:
             print("시세가 아직 없음 → 건너뜀")
             return 0
         day = us.index[-1].date()
-        payload = build_payload(us, macro, news, as_of=str(day))
+        kr_px, kr_stocks, kr_etfs = pick_kr(load_kr(conn))
+        payload = build_payload(us, macro, news, kr_px, kr_stocks, as_of=str(day), kr_etf_names=kr_etfs)
         save(conn, payload, day)
         print(f"daily_brief {day}: {payload['summary']}")
+        cover: dict[str, int] = {}
+        for u in payload["universe"]:
+            k = f"{u['market']}/{u['kind']}"
+            cover[k] = cover.get(k, 0) + (u["r"][2] is not None)
+        print("화면 목록(6개월 수익률 있는 개수): " + ", ".join(f"{k} {v}" for k, v in sorted(cover.items())))
     return 0
 
 
