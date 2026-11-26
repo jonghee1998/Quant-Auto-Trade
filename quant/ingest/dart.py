@@ -129,13 +129,22 @@ def q4_rows(rows: list[dict]) -> list[dict]:
     return out
 
 
-def collect(fetch: Fetch, key: str, stock_codes: list[str], today: date, years: int = 3) -> list[dict]:
-    """화면 종목들의 최근 years년 재무(분기·연간·시점 값 + 4분기 계산)."""
-    m = corp_codes(fetch, key)
-    corps = [m[c] for c in stock_codes if c in m]
-    rows: list[dict] = []
-    for y in range(today.year - years + 1, today.year + 1):
-        for reprt in REPORTS:
-            for i in range(0, len(corps), 100):
-                rows += to_rows(multi_accounts(fetch, key, corps[i:i + 100], y, reprt), reprt, y)
-    return rows + q4_rows(rows)
+def jobs(key: str, stock_codes: list[str], today: date, years: int = 3) -> list[tuple[str, callable]]:
+    """(이름, 수집함수) 목록: 연도·보고서·100곳 묶음마다 하나씩(각자 시간·결과가 로그에 남고 시간 예산이 적용된다).
+    회사 코드 ZIP은 처음 한 번만 받는다. 4분기 계산은 상세 화면(detail.fundamentals_view)이 한다."""
+    cache: dict = {}
+    n = (len(stock_codes) + 99) // 100
+
+    def corps(f) -> list[str]:
+        if "c" not in cache:
+            m = corp_codes(f, key)
+            cache["c"] = [m[c] for c in stock_codes if c in m]
+        return cache["c"]
+    out = []
+    for y in range(today.year, today.year - years, -1):  # 최근 해부터
+        for reprt, (fp, _form) in REPORTS.items():
+            for b in range(n):
+                out.append((f"{y}{fp} {b + 1}/{n}",
+                            lambda f, y=y, reprt=reprt, b=b: to_rows(multi_accounts(f, key, corps(f)[b * 100:(b + 1) * 100], y, reprt), reprt, y)
+                            if corps(f)[b * 100:(b + 1) * 100] else []))
+    return out
