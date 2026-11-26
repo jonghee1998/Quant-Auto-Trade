@@ -28,7 +28,8 @@ class HttpError(RuntimeError):
 NETWORK_ERROR = 0  # 연결 실패·시간 초과: 상태 코드 대신 0, 원래 예외(주소·키 포함)는 버린다
 
 
-def requests_fetch(timeout: float = 30.0) -> Fetch:
+def requests_fetch(timeout: tuple[float, float] = (10.0, 60.0)) -> Fetch:
+    # (연결, 읽기) 초. 응답이 느린 data.go.kr 큰 페이지도 받되, 멈춘 연결은 끊는다
     import requests
 
     def fetch(url, params=None, headers=None):

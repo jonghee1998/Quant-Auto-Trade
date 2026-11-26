@@ -6,6 +6,8 @@
 from __future__ import annotations
 
 import argparse
+import functools
+import time
 import os
 from datetime import date, timedelta
 from typing import Callable
@@ -57,20 +59,27 @@ SAVE = {"fundamentals": store.upsert_fundamentals, "prices": store.upsert_prices
 
 
 def run(env: dict, fetch: Fetch, conn=None, today: date | None = None, days: int = 5, out=print,
-        sources: set[str] | None = None) -> dict:
+        sources: set[str] | None = None, budget_s: float | None = None, clock=time.monotonic) -> dict:
+    """budget_s: 이 시간을 넘기면 남은 작업은 시작하지 않고 '시간 부족'으로 남긴다.
+    (Actions 제한 시간에 걸려 로그·요약 없이 통째로 취소되는 일을 막는다)"""
     today = today or date.today()
+    t0 = clock()
     secrets = [v for k, v in env.items() if any(w in k for w in ("KEY", "TOKEN", "SECRET", "DATABASE_URL", "AGENT")) and v]
     raw_out = out
     out = lambda msg: raw_out(redact(msg, secrets))  # noqa: E731 — 모든 출력에서 비밀값 가림
     missing = [s for s, keys in ENV.items() if not all(env.get(k) for k in keys)]
     if missing:
         out(f"키 없음 → 건너뜀: {', '.join(missing)}")
-    summary = {"ok": 0, "failed": 0, "rows": 0, "issues": 0}
+    summary = {"ok": 0, "failed": 0, "rows": 0, "issues": 0, "skipped": 0}
     jobs = plan(env, today, days)
     if sources:
         jobs = [j for j in jobs if j[0] in sources]
         out(f"고른 소스만: {', '.join(sorted(sources))}")
     for source, dataset, collect, kind in jobs:
+        if budget_s is not None and clock() - t0 > budget_s:
+            summary["skipped"] += 1
+            continue
+        t1 = clock()
         run_id = store.start_run(conn, source, dataset) if conn else None
         try:
             rows = collect(fetch)
@@ -82,21 +91,24 @@ def run(env: dict, fetch: Fetch, conn=None, today: date | None = None, days: int
             summary["ok"] += 1
             summary["rows"] += n
             summary["issues"] += len(issues)
-            out(f"{source} {dataset}: {n}건" + (f", 점검 {len(issues)}" if issues else ""))
+            out(f"{source} {dataset}: {n}건" + (f", 점검 {len(issues)}" if issues else "") + f" ({clock() - t1:.0f}초)")
         except Exception as e:  # 한 소스 실패가 나머지를 막지 않는다
             if conn:
                 conn.rollback()
                 store.finish_run(conn, store.start_run(conn, source, dataset), "failed", 0, redact(f"{type(e).__name__}: {e}", secrets))
                 conn.commit()
             summary["failed"] += 1
-            out(f"{source} {dataset}: 실패 {type(e).__name__}: {e}")
-    out(f"합계: 성공 {summary['ok']}, 실패 {summary['failed']}, {summary['rows']}건, 점검 {summary['issues']}")
+            out(f"{source} {dataset}: 실패 {type(e).__name__}: {e} ({clock() - t1:.0f}초)")
+    if summary["skipped"]:
+        out(f"시간 부족({budget_s:.0f}초 초과)으로 {summary['skipped']}개 작업을 건너뜀 — 다음 실행에서 이어서 받는다")
+    out(f"합계: 성공 {summary['ok']}, 실패 {summary['failed']}, {summary['rows']}건, 점검 {summary['issues']}, 건너뜀 {summary['skipped']}")
     return summary
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--days", type=int, default=5)
+    ap.add_argument("--budget-min", type=float, default=20, help="수집에 쓸 최대 분(Actions 제한 30분보다 작게)")
     ap.add_argument("--sources", default="", help="쉼표 구분: tiingo,fred,data.go.kr,naver,finnhub,sec (빈칸=전부)")
     a = ap.parse_args()
     env = dict(os.environ)
@@ -107,7 +119,8 @@ def main() -> int:
     else:
         print("DATABASE_URL 없음 → 저장 없이 건수만 확인")
     sources = {x.strip() for x in a.sources.split(",") if x.strip()} or None
-    s = run(env, requests_fetch(), conn, days=a.days, sources=sources)
+    out = functools.partial(print, flush=True)  # 파이프(tee)여도 줄마다 바로 로그에 남긴다
+    s = run(env, requests_fetch(), conn, days=a.days, out=out, sources=sources, budget_s=a.budget_min * 60)
     return 1 if s["ok"] == 0 and s["failed"] > 0 else 0
 
 

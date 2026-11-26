@@ -175,3 +175,19 @@ def test_kr_endpoints_use_v2():
     assert S.KR_ENDPOINTS["stock"].endswith("/1160100/GetStockSecuritiesInfoService_V2/getStockPriceInfo_V2")
     assert S.KR_ENDPOINTS["etf"].endswith("/1160100/GetSecuritiesProductInfoService_V2/getETFPriceInfo_V2")
     assert all("/service/" not in u for u in S.KR_ENDPOINTS.values())
+
+
+def test_run_stops_starting_jobs_after_time_budget():
+    # 느린 소스 때문에 Actions 제한 시간에 걸려 통째로 취소되지 않게: 예산을 넘기면 남은 작업은 건너뛰고 요약을 남긴다
+    from quant.ingest.run import run
+    now = [0.0]
+
+    def fetch(url, params=None, headers=None):
+        now[0] += 100  # 요청 하나에 100초 걸리는 느린 소스
+        return Response(200, json.dumps({"observations": []}))
+    out = []
+    s = run({"FRED_API_KEY": "FAKE"}, fetch, None, today=date(2024, 1, 5), out=out.append,
+            budget_s=250, clock=lambda: now[0])
+    from quant.ingest.universe import FRED_SERIES
+    assert s["ok"] == 3 and s["skipped"] == len(FRED_SERIES) - 3
+    assert any("시간 부족" in o for o in out) and "건너뜀" in out[-1]
