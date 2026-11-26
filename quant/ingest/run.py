@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import functools
 import time
+from concurrent.futures import ThreadPoolExecutor
 import os
 from datetime import date, timedelta
 from typing import Callable
@@ -60,6 +61,7 @@ def plan(env: dict, today: date, days: int, kr_have: set[tuple[str, str]] | None
     return jobs
 
 
+PARALLEL = {"data.go.kr": 4}  # 동시에 받을 개수(그 외 소스는 1개씩: 한도·순서가 중요)
 SAVE = {"fundamentals": store.upsert_fundamentals, "prices": store.upsert_prices, "macro": store.upsert_macro, "news": store.upsert_news}
 
 
@@ -85,30 +87,48 @@ def run(env: dict, fetch: Fetch, conn=None, today: date | None = None, days: int
     if sources:
         jobs = [j for j in jobs if j[0] in sources]
         out(f"고른 소스만: {', '.join(sorted(sources))}")
-    for source, dataset, collect, kind in jobs:
-        if budget_s is not None and clock() - t0 > budget_s:
-            summary["skipped"] += 1
-            continue
-        t1 = clock()
-        run_id = store.start_run(conn, source, dataset) if conn else None
-        try:
-            rows = collect(fetch)
-            issues = check_prices(rows) if kind == "prices" else []
-            n = SAVE[kind](conn, rows) if conn and rows else len(rows)
-            if conn:
-                store.finish_run(conn, run_id, "partial" if issues else "success", n, "; ".join(issues[:20]) or None)
-                conn.commit()
-            summary["ok"] += 1
-            summary["rows"] += n
-            summary["issues"] += len(issues)
-            out(f"{source} {dataset}: {n}건" + (f", 점검 {len(issues)}" if issues else "") + f" ({clock() - t1:.0f}초)")
-        except Exception as e:  # 한 소스 실패가 나머지를 막지 않는다
-            if conn:
-                conn.rollback()
-                store.finish_run(conn, store.start_run(conn, source, dataset), "failed", 0, redact(f"{type(e).__name__}: {e}", secrets))
-                conn.commit()
-            summary["failed"] += 1
-            out(f"{source} {dataset}: 실패 {type(e).__name__}: {e} ({clock() - t1:.0f}초)")
+    # 응답이 느린 소스는 여러 개를 동시에 받는다(받기만 병렬, 저장·로그는 순서대로 하나씩)
+    i = 0
+    with ThreadPoolExecutor(max_workers=max(PARALLEL.values())) as pool:
+        while i < len(jobs):
+            if budget_s is not None and clock() - t0 > budget_s:
+                summary["skipped"] += len(jobs) - i
+                break
+            src = jobs[i][0]
+            size = PARALLEL.get(src, 1)
+            batch = [jobs[i]]
+            while len(batch) < size and i + len(batch) < len(jobs) and jobs[i + len(batch)][0] == src:
+                batch.append(jobs[i + len(batch)])
+            i += len(batch)
+
+            def timed(collect):
+                t = clock()
+                try:
+                    return collect(fetch), None, clock() - t
+                except Exception as e:  # noqa: BLE001 — 한 작업 실패가 나머지를 막지 않는다
+                    return None, e, clock() - t
+            results = list(pool.map(lambda j: timed(j[2]), batch)) if len(batch) > 1 else [timed(batch[0][2])]
+            for (source, dataset, _, kind), (rows, err, secs) in zip(batch, results):
+                run_id = store.start_run(conn, source, dataset) if conn else None  # 실패하면 rollback으로 사라지므로 아래에서 새로 남긴다
+                try:
+                    if err is not None:
+                        raise err
+                    issues = check_prices(rows) if kind == "prices" else []
+                    n = SAVE[kind](conn, rows) if conn and rows else len(rows)
+                    if conn:
+                        store.finish_run(conn, run_id, "partial" if issues else "success", n, "; ".join(issues[:20]) or None)
+                        conn.commit()
+                    summary["ok"] += 1
+                    summary["rows"] += n
+                    summary["issues"] += len(issues)
+                    out(f"{source} {dataset}: {n}건" + (f", 점검 {len(issues)}" if issues else "") + f" ({secs:.0f}초)")
+                except Exception as e:  # 한 소스 실패가 나머지를 막지 않는다
+                    if conn:
+                        conn.rollback()
+                        store.finish_run(conn, store.start_run(conn, source, dataset), "failed", 0, redact(f"{type(e).__name__}: {e}", secrets))
+                        conn.commit()
+                    summary["failed"] += 1
+                    out(f"{source} {dataset}: 실패 {type(e).__name__}: {e} ({secs:.0f}초)")
     if summary["skipped"]:
         out(f"시간 부족({budget_s:.0f}초 초과)으로 {summary['skipped']}개 작업을 건너뜀 — 다음 실행에서 이어서 받는다")
     out(f"합계: 성공 {summary['ok']}, 실패 {summary['failed']}, {summary['rows']}건, 점검 {summary['issues']}, 건너뜀 {summary['skipped']}")
