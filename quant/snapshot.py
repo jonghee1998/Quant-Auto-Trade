@@ -194,7 +194,8 @@ def load_kr(conn, days: int = 200) -> pd.DataFrame:
     with conn.cursor() as cur:
         cur.execute("""select i.code, i.name, i.kind, p.date, p.close * p.adj_factor, p.volume from prices_daily p
                        join instruments i on i.id = p.instrument_id
-                       where i.market = 'KR' and p.date >= current_date - %s""", (days,))
+                       where i.market = 'KR' and (p.date >= current_date - %s
+                         or (i.kind = 'index' and p.date >= current_date - 400))""", (days,))  # 지수는 1년 수익률용으로 더 길게
         return pd.DataFrame(cur.fetchall(), columns=["code", "name", "kind", "date", "close", "volume"])
 
 
