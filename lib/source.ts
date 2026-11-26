@@ -7,7 +7,7 @@ export type { MarketData };
 
 const SAMPLE: MarketData = {
   sample: true, asOf: '—', summary: '', quotes: [], trendLight: { state: null, gapPct: null },
-  breadth: { above: 0, total: 0 }, news: [], universe: [], bench: { US: [null, null, null], KR: [null, null, null], W: [null, null, null] },
+  breadth: { above: 0, total: 0 }, news: [], universe: [], signals: null, coverage: {}, ai: {}, bench: { US: [null, null, null], KR: [null, null, null], W: [null, null, null] },
 };
 
 export async function getMarket(): Promise<MarketData> {

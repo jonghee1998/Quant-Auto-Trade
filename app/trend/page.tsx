@@ -13,7 +13,7 @@ export default async function Trend() {
       <MarketSeg on="trend" />
       <Planned title="관심 종목" note="종목 상세의 ★로 담아 두면 여기에 1개월 수익률과 장기 추세(200일선 위/아래)가 항상 떠요." />
       <Planned title="이번 달 데이터가 고른 것" note="실험실에서 검증을 통과한 전략이 생기면, 그 전략이 고른 좋은 3·나쁜 3과 이유가 여기에 떠요." />
-      {d.sample ? <Connecting reason={d.sampleReason} /> : <TrendList universe={d.universe} bench={d.bench} />}
+      {d.sample ? <Connecting reason={d.sampleReason} /> : <TrendList universe={d.universe} bench={d.bench} coverage={d.coverage} why={d.ai.why ?? {}} />}
       <div style={{ margin: '12px 16px 0' }}><input type="search" placeholder="목록에 없는 종목 찾기 (전 종목)" aria-label="종목 검색" /></div>
       <TabBar on="market" />
     </main>
