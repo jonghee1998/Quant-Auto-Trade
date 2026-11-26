@@ -1,19 +1,20 @@
 'use client';
 import { useState } from 'react';
 import Link from 'next/link';
-import type { Item, Bench } from '../../lib/types';
+import type { Item, Bench, Coverage, AiWhy } from '../../lib/types';
 import { rankItems, barSpan, type Market, type Kind } from '../../lib/trend';
 import { pct, tone } from '../../lib/format';
 
 const PERIODS = ['1개월', '3개월', '6개월'] as const;
 const MARKETS: [Market, string][] = [['US', '미국'], ['KR', '한국'], ['W', '나라별']];
 
-export default function TrendList({ universe: UNIVERSE, bench: BENCH }: { universe: Item[]; bench: Bench }) {
+export default function TrendList({ universe: UNIVERSE, bench: BENCH, coverage = {}, why = {} }: { universe: Item[]; bench: Bench; coverage?: Coverage; why?: Record<string, AiWhy> }) {
   const [strong, setStrong] = useState(true);
   const [market, setMarket] = useState<Market>('US');
   const [kind, setKind] = useState<Kind>('업종');
   const [period, setPeriod] = useState<0 | 1 | 2>(1);
-  const rows = rankItems(UNIVERSE, market, kind, period, strong);
+  const rows = rankItems(UNIVERSE, market, kind, period, strong, 15);
+  const cov = coverage[market === 'W' ? 'W/나라' : `${market}/${kind}`];
   const bench = BENCH[market][period];
   const all = rankItems(UNIVERSE, market, kind, period, true, 1000).map((i) => Math.abs(i.ret));
   const maxAbs = Math.max(1, ...all, Math.abs(bench ?? 0));
@@ -39,14 +40,19 @@ export default function TrendList({ universe: UNIVERSE, bench: BENCH }: { univer
           {PERIODS.map((l, i) => <button key={l} type="button" className={`chip ${period === i ? 'on' : ''}`} onClick={() => setPeriod(i as 0 | 1 | 2)}>{l}</button>)}
         </div>
       </div>
-      <div style={{ margin: '16px 16px 0', fontSize: 16, fontWeight: 700 }}>{what} · 최근 {PERIODS[period]} {strong ? '가장 많이 오른 곳' : '가장 많이 내린 곳'}</div>
+      <div style={{ margin: '16px 16px 0', fontSize: 16, fontWeight: 700 }}>{what} · 최근 {PERIODS[period]} {strong ? '가장 많이 오른' : '가장 많이 내린'} TOP 15</div>
+      {cov && (
+        <div className="sub" style={{ margin: '4px 16px 0', lineHeight: 1.5 }}>
+          {cov.total ? `전체 ${cov.total.toLocaleString()}종목 중 ${cov.note ?? ''} ${cov.shown}종목을 비교` : `${cov.note ?? ''} ${cov.shown}개를 비교`}
+        </div>
+      )}
       <section className="card" style={{ paddingTop: 0, paddingBottom: 0 }}>
         {rows.length === 0 && <div className="row sub">— 아직 데이터가 없어요</div>}
                 {rows.map((r, i) => {
           const s = barSpan(r.ret, maxAbs);
           const t = tone(r.ret);
           return (
-            <Link key={r.code} href={`/stock/${r.code}`} className="row">
+            <Link key={r.code} href={`/stock/${r.code}?m=${r.market}`} className="row" style={{ flexWrap: 'wrap' }}>
               <span className="muted" style={{ width: 16 }}>{i + 1}</span>
               <div style={{ width: 96, flex: 'none' }}><div style={{ fontSize: 14 }}>{r.name}</div><div className="muted">{r.code}</div></div>
               <div className="bar">
@@ -54,6 +60,7 @@ export default function TrendList({ universe: UNIVERSE, bench: BENCH }: { univer
                 <div style={{ position: 'absolute', top: -4, left: `${benchLeft}%`, width: 2, height: 16, background: 'var(--ink)' }} />
               </div>
               <span className={`${t} b`} style={{ width: 58, textAlign: 'right', fontSize: 14 }}>{pct(r.ret)}</span>
+              {why[`${r.market}:${r.code}`] && <div className="sub" style={{ width: '100%', paddingLeft: 26, lineHeight: 1.45 }}>{why[`${r.market}:${r.code}`].line} ›</div>}
             </Link>
           );
         })}

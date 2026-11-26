@@ -76,3 +76,25 @@ def test_pick_news_prefers_market_news_and_drops_pr_and_clickbait():
     ]
     p = SN.pick_news(news)
     assert [x["title"] for x in p] == ["Stocks fall as yields climb (합성)", "Fed holds rates (합성)", "합성 종목 실적 발표"]
+
+
+def test_signals_three_lights():
+    idx = pd.bdate_range("2023-01-02", periods=300)
+    up = pd.Series(100 * 1.001 ** np.arange(300), index=idx)
+    px = pd.DataFrame({"SPY": up, **{c: up for c in ["XLK", "XLF", "XLE", "XLV"]}})
+    calm = {"VIXCLS": pd.Series(15.0, index=idx), "VXVCLS": pd.Series(18.0, index=idx),
+            "BAMLH0A0HYM2": pd.Series(3.0, index=idx)}
+    s = SN.signals(px, calm)
+    assert s["state"] == "green" and [i["good"] for i in s["items"]] == [True, True, True]
+    scared = dict(calm, VIXCLS=pd.Series(25.0, index=idx))
+    assert SN.signals(px, scared)["state"] == "yellow"
+    down = px.iloc[::-1].set_axis(idx)  # 하락 추세
+    assert SN.signals(down, scared)["state"] == "red"
+    assert SN.signals(px, {})["state"] is None  # 위험 데이터 없으면 판단 안 함
+
+
+def test_coverage_counts():
+    uni = [{"market": "KR", "kind": "주식"}] * 3 + [{"market": "US", "kind": "업종"}] * 2
+    c = SN.coverage(uni, {"stock": 2879})
+    assert c["KR/주식"] == {"shown": 3, "total": 2879, "note": "거래대금 상위"}
+    assert c["US/업종"]["note"] == "직접 고른 대표 목록" and "total" not in c["US/업종"]

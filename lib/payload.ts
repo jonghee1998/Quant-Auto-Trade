@@ -1,5 +1,5 @@
 // daily_brief payload → 화면 데이터. 서버·테스트 공용(의존성 없음).
-import type { Item, Quote } from './types';
+import type { Ai, Coverage, Item, Quote, Signals } from './types';
 
 export type MarketData = {
   sample: boolean;
@@ -13,6 +13,9 @@ export type MarketData = {
   news: { title: string; where: string }[];
   universe: Item[];
   bench: Record<'US' | 'KR' | 'W', (number | null)[]>;
+  signals: Signals | null;
+  coverage: Coverage;
+  ai: Ai;
 };
 
 /** payload를 화면 모양으로 검사·변환. 모양이 다르면 null. */
@@ -33,6 +36,9 @@ export function fromPayload(p: unknown): MarketData | null {
     news: Array.isArray(o.news) ? (o.news as MarketData['news']) : [],
     universe: Array.isArray(o.universe) ? (o.universe as Item[]).map((u) => ({ ...u, r: arr3(u.r) as Item['r'] })) : [],
     bench: { US: arr3(bench.US), KR: arr3(bench.KR), W: arr3(bench.W) },
+    signals: o.signals && typeof o.signals === 'object' && Array.isArray((o.signals as Signals).items) ? (o.signals as Signals) : null,
+    coverage: o.coverage && typeof o.coverage === 'object' ? (o.coverage as Coverage) : {},
+    ai: o.ai && typeof o.ai === 'object' ? (o.ai as Ai) : {},
   };
 }
 

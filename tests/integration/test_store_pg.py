@@ -92,3 +92,18 @@ def test_upsert_instruments_bulk_keeps_names(conn):
     with conn.cursor() as cur:
         cur.execute("select name from instruments where market = 'KR' and code = 'TEST0003'")
         assert cur.fetchone()[0] == "가짜종목3"
+
+
+def test_snapshot_save_keeps_ai_part(conn):
+    # 같은 날 스냅샷을 다시 만들어도 AI가 쓴 부분은 남아야 한다(수동 수집 때마다 지워지던 문제 방지)
+    import json
+    from datetime import date
+    from quant import snapshot as SN
+    day = date(2000, 1, 3)
+    SN.save(conn, {"summary": "합성1", "quotes": []}, day)
+    with conn.cursor() as cur:
+        cur.execute("update daily_brief set payload = payload || %s::jsonb where date = %s", (json.dumps({"ai": {"market": {"us": "합성"}}}), day))
+    SN.save(conn, {"summary": "합성2", "quotes": [1]}, day)
+    with conn.cursor() as cur:
+        cur.execute("select payload->'ai'->'market'->>'us', payload->>'summary', jsonb_array_length(payload->'quotes') from daily_brief where date = %s", (day,))
+        assert cur.fetchone() == ("합성", "합성2", 1)

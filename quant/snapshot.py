@@ -156,8 +156,56 @@ def pick_news(news: list[dict], n_us: int = 3, n_kr: int = 2) -> list[dict]:
     return (us_market + us_ticker)[:n_us] + kr
 
 
+def coverage(universe: list[dict], kr_totals: dict) -> dict:
+    """화면 목록이 전체 중 몇 개인지. 한국은 전 종목 중 거래대금 상위만, 미국·나라는 직접 고른 목록."""
+    out: dict[str, dict] = {}
+    for u in universe:
+        k = f"{u['market']}/{u['kind']}"
+        out.setdefault(k, {"shown": 0})["shown"] += 1
+    notes = {"KR/주식": ("stock", "거래대금 상위"), "KR/업종": ("etf", "거래대금 상위(레버리지·인버스 제외)")}
+    for k, v in out.items():
+        if k in notes and kr_totals.get(notes[k][0]):
+            v["total"], v["note"] = int(kr_totals[notes[k][0]]), notes[k][1]
+        else:
+            v["note"] = "직접 고른 대표 목록"
+    return out
+
+
+def signals(us_px: pd.DataFrame, macro: dict[str, pd.Series]) -> dict:
+    """신호등 3가지(지금 상태 표시, 매매 신호 아님). 다 좋으면 green, 2개 yellow, 1개 이하 red. 계산 못 한 건 good=None."""
+    spy = us_px["SPY"] if "SPY" in us_px else pd.Series(dtype=float)
+    light = MK.trend_light(spy)
+    gap = _f(light["gap_pct"])
+    trend = {"key": "trend", "title": "추세", "good": None if gap is None else gap >= 0,
+             "text": "데이터 부족" if gap is None else
+             f"S&P 500이 200일 평균보다 {abs(gap):.1f}% {'위' if gap >= 0 else '아래'} ({'장기 상승 중' if gap >= 0 else '장기 하락 쪽'})"}
+    sectors = [c for c in U.SECTORS if c.startswith("XL") and c in us_px]
+    br = MK.breadth(us_px[sectors]) if sectors else {"above": 0, "total": 0}
+    wide = {"key": "breadth", "title": "폭", "good": None if not br["total"] else br["above"] * 2 >= br["total"],
+            "text": f"업종 {br['total']}개 중 {br['above']}개가 상승 추세" + (
+                " (여러 업종이 함께 오르는 장)" if br["total"] and br["above"] * 2 >= br["total"] else " (오르는 업종이 적음)" if br["total"] else "")}
+    vix, vxv = macro.get("VIXCLS", pd.Series(dtype=float)).dropna(), macro.get("VXVCLS", pd.Series(dtype=float)).dropna()
+    hy = macro.get("BAMLH0A0HYM2", pd.Series(dtype=float)).dropna()
+    parts, good = [], None
+    if len(vix) and len(vxv):
+        calm = vix.iloc[-1] < vxv.iloc[-1]
+        good = calm
+        parts.append("단기 불안(VIX)이 중기보다 " + ("낮음" if calm else "높음 — 당장 불안이 큼"))
+    if len(hy) > 21:
+        d = hy.iloc[-1] - hy.iloc[-22]
+        ok = d < 0.3
+        good = ok if good is None else (good and ok)
+        parts.append(f"회사채 위험 가산금리 한 달 {'+' if d >= 0 else '−'}{abs(d):.2f}%p" + ("" if ok else " (빠르게 오름)"))
+    risk = {"key": "risk", "title": "위험", "good": good, "text": " · ".join(parts) or "데이터 부족"}
+    items = [trend, wide, risk]
+    known = [i["good"] for i in items if i["good"] is not None]
+    state = None if len(known) < 3 else ("green" if all(known) else "yellow" if sum(known) == 2 else "red")
+    return {"state": state, "good": sum(known), "items": items}
+
+
 def build_payload(us_px: pd.DataFrame, macro: dict[str, pd.Series], news: list[dict], kr_px: pd.DataFrame | None = None,
-                  kr_names: dict | None = None, as_of: str | None = None, kr_etf_names: dict | None = None) -> dict:
+                  kr_names: dict | None = None, as_of: str | None = None, kr_etf_names: dict | None = None,
+                  kr_totals: dict | None = None) -> dict:
     quotes = []
     for qid, name, kind, src in QUOTE_DEFS:
         if kind == "kr":
@@ -185,6 +233,8 @@ def build_payload(us_px: pd.DataFrame, macro: dict[str, pd.Series], news: list[d
         "asOf": as_of, "summary": summary_line(quotes), "quotes": quotes,
         "trendLight": {"state": light["state"], "gapPct": _f(light["gap_pct"])},
         "breadth": MK.breadth(us_px[sectors]) if sectors else {"above": 0, "total": 0},
+        "signals": signals(us_px, macro),
+        "coverage": coverage(universe, kr_totals or {}),
         "universe": universe, "bench": {"US": bench_us, "W": bench_us, "KR": bench_kr},
         "news": pick_news(news),
     }
@@ -222,7 +272,11 @@ def load_from_db(conn, days: int = 400) -> tuple[pd.DataFrame, dict, list[dict]]
 def save(conn, payload: dict, day: date) -> None:
     with conn.cursor() as cur:
         cur.execute("""insert into daily_brief (date, summary, payload) values (%s, %s, %s)
-                       on conflict (date) do update set summary = excluded.summary, payload = excluded.payload, generated_at = now()""",
+                       on conflict (date) do update set summary = excluded.summary, generated_at = now(),
+                         -- 같은 날 다시 만들어도 AI가 쓴 부분(ai)은 지우지 않는다
+                         payload = case when daily_brief.payload ? 'ai'
+                                        then excluded.payload || jsonb_build_object('ai', daily_brief.payload -> 'ai')
+                                        else excluded.payload end""",
                     (day, payload["summary"], json.dumps(payload, ensure_ascii=False)))
     conn.commit()
 
@@ -239,8 +293,13 @@ def main() -> int:
             print("시세가 아직 없음 → 건너뜀")
             return 0
         day = us.index[-1].date()
-        kr_px, kr_stocks, kr_etfs = pick_kr(load_kr(conn))
-        payload = build_payload(us, macro, news, kr_px, kr_stocks, as_of=str(day), kr_etf_names=kr_etfs)
+        kr_rows = load_kr(conn)
+        kr_px, kr_stocks, kr_etfs = pick_kr(kr_rows)
+        kr_totals = {}
+        if not kr_rows.empty:
+            last = kr_rows[kr_rows["date"] == kr_rows["date"].max()]
+            kr_totals = last.groupby("kind")["code"].nunique().to_dict()
+        payload = build_payload(us, macro, news, kr_px, kr_stocks, as_of=str(day), kr_etf_names=kr_etfs, kr_totals=kr_totals)
         save(conn, payload, day)
         print(f"daily_brief {day}: {payload['summary']}")
         cover: dict[str, int] = {}
