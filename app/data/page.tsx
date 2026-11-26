@@ -22,7 +22,7 @@ export default async function DataPage() {
         </section>
         <section className="card">
           <h2>소스별 최근 7일</h2>
-          <div className="sub" style={{ marginTop: 2 }}>● 성공 · ● 실패 · ○ 실행 없음 (왼쪽이 6일 전)</div>
+          <div className="sub" style={{ marginTop: 2, lineHeight: 1.5 }}>● 그날 마지막 결과가 모두 성공 · ● 하나라도 실패 · ○ 실행 없음 (왼쪽이 6일 전)</div>
           {s.sources.map((x) => (
             <div key={x.source} className="row" style={{ display: 'block' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -32,7 +32,7 @@ export default async function DataPage() {
                 </span>
               </div>
               <div className="sub" style={{ marginTop: 3 }}>
-                마지막 {x.lastAt} · {x.lastStatus === 'ok' ? '성공' : x.lastStatus === 'failed' ? '실패' : `일부 실패 ${x.failedLast}/${x.jobsLast}`} · {x.lastRows.toLocaleString()}건
+                마지막 {x.lastAt} · {x.lastStatus === 'ok' ? '성공' : x.lastStatus === 'failed' ? '실패' : `${x.failedLast}개 실패`} · {x.lastRows.toLocaleString()}건 · 데이터 {x.jobsLast}개
               </div>
               {x.lastError && <div className="sub" style={{ marginTop: 3, color: 'var(--up)', wordBreak: 'break-all' }}>확인할 것: {x.lastError}</div>}
             </div>
