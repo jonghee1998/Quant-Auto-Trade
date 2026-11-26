@@ -79,10 +79,11 @@ def fred_series(fetch: Fetch, series: str, start: date, api_key: str) -> list[di
 
 
 # ---------------------------------------------------------------- 한국 시세: 공공데이터포털(금융위원회)
-DATA_GO_KR = "https://apis.data.go.kr/1160100/service"
+# 지금 발급되는 키는 V2 주소에만 등록된다. 예전 /service/... 주소는 같은 키를 "등록되지 않은 키"(403)로 거부.
+DATA_GO_KR = "https://apis.data.go.kr/1160100"
 KR_ENDPOINTS = {
-    "stock": f"{DATA_GO_KR}/GetStockSecuritiesInfoService/getStockPriceInfo",
-    "etf": f"{DATA_GO_KR}/GetSecuritiesProductInfoService/getETFPriceInfo",
+    "stock": f"{DATA_GO_KR}/GetStockSecuritiesInfoService_V2/getStockPriceInfo_V2",
+    "etf": f"{DATA_GO_KR}/GetSecuritiesProductInfoService_V2/getETFPriceInfo_V2",
 }
 
 
