@@ -116,6 +116,14 @@ CLICKBAIT = re.compile(r"^\d+\s+(ways|reasons|stocks?|things)\b|should you buy|b
                        re.IGNORECASE)
 
 
+# 시장 전체 뉴스(Finnhub general)는 국제 정치 등 일반 뉴스도 섞인다 → 시장 단어가 있는 것만
+MARKET_WORDS = re.compile(r"\b(stocks?|shares|equit(y|ies)|wall st(reet)?|s&p|nasdaq|dow|index(es)?|futures|fed|federal reserve|"
+                          r"powell|rates?|yields?|treasur(y|ies)|bonds?|inflation|cpi|pce|jobs report|payrolls|unemployment|gdp|"
+                          r"recession|earnings|profit|revenue|guidance|oil|crude|gold|dollar|currenc(y|ies)|tariffs?|"
+                          r"ipo|markets?|investors?|traders?|rally|sell-?off|selloff|volatility|vix)\b", re.IGNORECASE)
+SUFFIX = re.compile(r"\s+-\s+(reuters|cnbc|bloomberg|marketwatch|associated press|ap|wsj)$", re.IGNORECASE)
+
+
 def _home_ok(x: dict) -> bool:
     pub = (x.get("publisher") or "").lower()
     return not any(p in pub for p in PR_PUBLISHERS) and not CLICKBAIT.search(x["title"])
@@ -135,8 +143,11 @@ def pick_news(news: list[dict], n_us: int = 3, n_kr: int = 2) -> list[dict]:
         if x.get("source") in KR_NEWS_SOURCES:
             if len(kr) < n_kr:
                 kr.append({"title": x["title"], "where": "한국"})
+        elif x.get("source") == "finnhub_market":
+            if MARKET_WORDS.search(x["title"]):
+                us_market.append({"title": SUFFIX.sub("", x["title"]), "where": "미국"})
         else:
-            (us_market if x.get("source") == "finnhub_market" else us_ticker).append({"title": x["title"], "where": "미국"})
+            us_ticker.append({"title": x["title"], "where": "미국"})
     return (us_market + us_ticker)[:n_us] + kr
 
 
