@@ -104,3 +104,32 @@ def test_run_skips_missing_keys_and_continues_after_failure():
     assert any("tiingo" in o and "건너뜀" in o for o in out)
     assert not any("FAKE" in o for o in out)
     assert all("stlouisfed" in u for u in calls)
+
+
+def test_network_error_and_output_never_leak_keys():
+    from urllib.parse import quote
+    from quant.ingest.http import NETWORK_ERROR, redact, requests_fetch
+    from quant.ingest.run import run
+    key = "FAKE+KEY/abc=123456"
+    assert redact(f"a {key} b {quote(key, safe='')}", [key]) == "a *** b ***"
+
+    def boom(url, params=None, headers=None):  # 예외 메시지에 키가 든 URL
+        raise RuntimeError(f"https://example.com/x?api_key={quote(key, safe='')}")
+    out = []
+    s = run({"FRED_API_KEY": key}, boom, None, today=date(2024, 1, 5), out=out.append)
+    assert s["failed"] > 0
+    joined = "\n".join(out)
+    assert key not in joined and quote(key, safe="") not in joined and "***" in joined
+
+    f = FakeFetch((NETWORK_ERROR, "ConnectTimeout"), (NETWORK_ERROR, "ConnectTimeout"), (NETWORK_ERROR, "ConnectTimeout"))
+    with pytest.raises(HttpError) as e:
+        get_json(f, "https://x", {"serviceKey": key}, source="t", sleep=lambda s: None)
+    assert "연결 실패" in str(e.value) and key not in str(e.value)
+    assert len(f.calls) == 3  # 연결 실패도 재시도
+
+
+def test_http_error_includes_redactable_snippet():
+    f = FakeFetch((403, "<OpenAPI_ServiceResponse><returnAuthMsg>SERVICE_KEY_IS_NOT_REGISTERED_ERROR</returnAuthMsg>"))
+    with pytest.raises(HttpError) as e:
+        get_json(f, "https://x", None, source="data.go.kr", sleep=lambda s: None)
+    assert "SERVICE_KEY_IS_NOT_REGISTERED" in str(e.value)

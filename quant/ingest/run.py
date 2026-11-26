@@ -11,7 +11,7 @@ from datetime import date, timedelta
 from typing import Callable
 
 from . import sec, sources as S, store, universe as U
-from .http import Fetch, requests_fetch
+from .http import Fetch, redact, requests_fetch
 from .quality import check_prices
 
 ENV = {"tiingo": ["TIINGO_TOKEN"], "fred": ["FRED_API_KEY"], "kr": ["DATA_GO_KR_KEY"],
@@ -58,6 +58,9 @@ SAVE = {"fundamentals": store.upsert_fundamentals, "prices": store.upsert_prices
 
 def run(env: dict, fetch: Fetch, conn=None, today: date | None = None, days: int = 5, out=print) -> dict:
     today = today or date.today()
+    secrets = [v for k, v in env.items() if any(w in k for w in ("KEY", "TOKEN", "SECRET", "DATABASE_URL", "AGENT")) and v]
+    raw_out = out
+    out = lambda msg: raw_out(redact(msg, secrets))  # noqa: E731 — 모든 출력에서 비밀값 가림
     missing = [s for s, keys in ENV.items() if not all(env.get(k) for k in keys)]
     if missing:
         out(f"키 없음 → 건너뜀: {', '.join(missing)}")
@@ -78,7 +81,7 @@ def run(env: dict, fetch: Fetch, conn=None, today: date | None = None, days: int
         except Exception as e:  # 한 소스 실패가 나머지를 막지 않는다
             if conn:
                 conn.rollback()
-                store.finish_run(conn, store.start_run(conn, source, dataset), "failed", 0, str(e))
+                store.finish_run(conn, store.start_run(conn, source, dataset), "failed", 0, redact(f"{type(e).__name__}: {e}", secrets))
                 conn.commit()
             summary["failed"] += 1
             out(f"{source} {dataset}: 실패 {type(e).__name__}: {e}")
