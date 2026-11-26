@@ -64,7 +64,7 @@ def _z(s: pd.Series, n: int = 252) -> pd.Series:
     return (s - m) / sd.replace(0, np.nan)
 
 
-MACRO_FEATS = ["vix", "vix_term", "hy", "hy_ch21", "ig_ch21", "curve_2y", "curve_3m", "dgs10_ch21", "real10", "infl5",
+MACRO_FEATS = ["vix", "vix_term", "baa", "baa_ch21", "hy", "hy_ch21", "ig_ch21", "curve_2y", "curve_3m", "dgs10_ch21", "real10", "infl5",
                "usd_ch63", "oil_ch63", "nfci", "stress", "claims_yoy", "sahm", "sent_z", "epu_z", "emv_z", "krw_ch21"]
 NEWS_FEATS = ["epu_z", "emv_z"]  # 신문 기사 기반(Baker·Bloom·Davis) — 2005년부터 있는 뉴스 재료
 
@@ -77,6 +77,8 @@ def macro_panel(macro: dict[str, pd.DataFrame], dates: pd.DatetimeIndex) -> pd.D
     f = pd.DataFrame(index=dates)
     f["vix"] = s("VIXCLS")
     f["vix_term"] = s("VIXCLS") / s("VXVCLS")
+    f["baa"] = s("BAA10Y")  # 신용 위험(긴 역사). 하이일드·투자등급은 FRED에 최근 3년만 → 학습 창에서 자동으로 빠짐
+    f["baa_ch21"] = f["baa"] - f["baa"].shift(21)
     f["hy"] = s("BAMLH0A0HYM2")
     f["hy_ch21"] = f["hy"] - f["hy"].shift(21)
     f["ig_ch21"] = s("BAMLC0A0CM") - s("BAMLC0A0CM").shift(21)

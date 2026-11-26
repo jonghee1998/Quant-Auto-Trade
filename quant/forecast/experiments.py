@@ -107,5 +107,5 @@ EXPERIMENTS: list[Exp] = [
     Exp("X05", "조합", "C10을 최근 8년 창으로만 학습하면(옛 시장을 잊음) 더 안정적이다", _r("X05", feats="PMN", model="ens", train_years=8)),
 ]
 assert len(EXPERIMENTS) == 30 and len({e.id for e in EXPERIMENTS}) == 30
-MACRO_SERIES = ["VIXCLS", "VXVCLS", "BAMLH0A0HYM2", "BAMLC0A0CM", "T10Y2Y", "T10Y3M", "DGS10", "DFII10", "T5YIE", "DTWEXBGS",
+MACRO_SERIES = ["VIXCLS", "VXVCLS", "BAA10Y", "BAMLH0A0HYM2", "BAMLC0A0CM", "T10Y2Y", "T10Y3M", "DGS10", "DFII10", "T5YIE", "DTWEXBGS",
                 "DCOILWTICO", "NFCI", "STLFSI4", "ICSA", "SAHMREALTIME", "UMCSENT", "USEPUINDXD", "WLEMUINDXD", "DEXKOUS"]

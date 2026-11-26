@@ -18,7 +18,7 @@ from .features import (MACRO_FEATS, NEWS_FEATS, PRICE_FEATS, SWING_FEATS, forwar
                        training_dates)
 from .models import make, make_clf
 
-INTERACT = ["vix", "hy_ch21", "curve_2y", "dgs10_ch21", "usd_ch63", "oil_ch63", "nfci", "real10"]
+INTERACT = ["vix", "baa_ch21", "curve_2y", "dgs10_ch21", "usd_ch63", "oil_ch63", "nfci", "real10"]
 
 
 def _feature_sets(kind: str) -> tuple[list[str], list[str]]:
@@ -29,7 +29,7 @@ def _feature_sets(kind: str) -> tuple[list[str], list[str]]:
         "PM": (PRICE_FEATS, macro_no_news),
         "PMN": (PRICE_FEATS, MACRO_FEATS),
         "S": (SWING_FEATS, []),
-        "SM": (SWING_FEATS, ["vix", "vix_term", "hy_ch21", "dgs10_ch21", "usd_ch63", "epu_z", "emv_z"]),
+        "SM": (SWING_FEATS, ["vix", "vix_term", "baa_ch21", "dgs10_ch21", "usd_ch63", "epu_z", "emv_z"]),
     }[kind]
 
 

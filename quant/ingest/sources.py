@@ -49,7 +49,7 @@ def tiingo_daily(fetch: Fetch, ticker: str, start: date, end: date, token: str) 
 
 # ---------------------------------------------------------------- 매크로·VIX: FRED
 FRED_DAILY = {"VIXCLS", "VXVCLS", "DEXKOUS", "DGS10", "DGS2", "T10Y2Y", "T10Y3M", "DFF", "BAMLH0A0HYM2",
-              "USEPUINDXD", "WLEMUINDXD", "DTWEXBGS", "DCOILWTICO", "T5YIE", "DFII10", "BAMLC0A0CM"}
+              "USEPUINDXD", "WLEMUINDXD", "DTWEXBGS", "DCOILWTICO", "T5YIE", "DFII10", "BAMLC0A0CM", "BAA10Y"}
 
 
 def fred_series(fetch: Fetch, series: str, start: date, api_key: str) -> list[dict]:
