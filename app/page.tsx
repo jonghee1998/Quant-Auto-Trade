@@ -3,7 +3,7 @@ import { Connecting, TabBar, MarketSeg, Signed } from '../components/ui';
 import { getMarket } from '../lib/source';
 import { num, pct, moveLabel } from '../lib/format';
 
-export const dynamic = 'force-dynamic'; // 배포 때 만든 예시 화면을 재사용하지 않고 요청마다 DB에서 읽는다
+export const dynamic = 'force-dynamic'; // 배포 때 만든 화면을 재사용하지 않고 요청마다 DB에서 읽는다
 
 export default async function Today() {
   const d = await getMarket();
