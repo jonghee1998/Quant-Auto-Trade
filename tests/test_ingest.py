@@ -168,3 +168,10 @@ def test_kr_service_key_undoes_portal_encoding():
     # 가짜 키: 인코딩 형태와 디코딩 형태가 같은 값으로 보내져야 한다
     assert S.kr_service_key("FAKE%2Babc%3D%3D") == "FAKE+abc=="
     assert S.kr_service_key(" FAKE+abc== ") == "FAKE+abc=="
+
+
+def test_kr_endpoints_use_v2():
+    # 예전 /service/ 주소는 V2로 승인된 키를 거부한다
+    assert S.KR_ENDPOINTS["stock"].endswith("/1160100/GetStockSecuritiesInfoService_V2/getStockPriceInfo_V2")
+    assert S.KR_ENDPOINTS["etf"].endswith("/1160100/GetSecuritiesProductInfoService_V2/getETFPriceInfo_V2")
+    assert all("/service/" not in u for u in S.KR_ENDPOINTS.values())
