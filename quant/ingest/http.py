@@ -25,13 +25,31 @@ class HttpError(RuntimeError):
     """URL·파라미터(키 포함)는 메시지에 넣지 않는다."""
 
 
+NETWORK_ERROR = 0  # 연결 실패·시간 초과: 상태 코드 대신 0, 원래 예외(주소·키 포함)는 버린다
+
+
 def requests_fetch(timeout: float = 30.0) -> Fetch:
     import requests
 
     def fetch(url, params=None, headers=None):
-        r = requests.get(url, params=params, headers=headers, timeout=timeout)
+        try:
+            r = requests.get(url, params=params, headers=headers, timeout=timeout)
+        except requests.RequestException as e:
+            # requests 예외 메시지에는 쿼리(키 포함)가 든 URL이 들어간다 → 종류만 남긴다
+            return Response(NETWORK_ERROR, type(e).__name__)
         return Response(r.status_code, r.text)
     return fetch
+
+
+def redact(text: str, secrets) -> str:
+    """비밀값(원문·URL 인코딩 형태)을 ***로 가린다. 로그·DB에 남기기 전 마지막 방어선."""
+    from urllib.parse import quote, quote_plus
+    out = str(text)
+    for v in secrets:
+        if v and len(v) >= 8:
+            for form in {v, quote(v, safe=""), quote_plus(v)}:
+                out = out.replace(form, "***")
+    return out
 
 
 def get_json(fetch: Fetch, url: str, params=None, headers=None, *, source: str,
@@ -41,8 +59,12 @@ def get_json(fetch: Fetch, url: str, params=None, headers=None, *, source: str,
         r = fetch(url, params, headers)
         if r.status == 200:
             return r.json()
-        if (r.status == 429 or r.status >= 500) and attempt < retries:
+        if (r.status in (NETWORK_ERROR, 429) or r.status >= 500) and attempt < retries:
             sleep(2.0 * (attempt + 1))
             continue
-        raise HttpError(f"{source}: HTTP {r.status}")
+        if r.status == NETWORK_ERROR:
+            raise HttpError(f"{source}: 연결 실패({r.text[:40]})")
+        # 원인 파악용 응답 앞부분(키가 섞일 수 있어 호출한 쪽에서 redact 후 기록)
+        snippet = " ".join(str(r.text or "").split())[:160]
+        raise HttpError(f"{source}: HTTP {r.status}" + (f" · {snippet}" if snippet else ""))
     raise HttpError(f"{source}: 재시도 초과")  # pragma: no cover
