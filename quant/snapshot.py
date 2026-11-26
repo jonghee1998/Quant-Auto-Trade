@@ -165,7 +165,7 @@ def coverage(universe: list[dict], kr_totals: dict) -> dict:
     notes = {"KR/주식": ("stock", "거래대금 상위"), "KR/업종": ("etf", "거래대금 상위(레버리지·인버스 제외)")}
     for k, v in out.items():
         if k in notes and kr_totals.get(notes[k][0]):
-            v["total"], v["note"] = int(kr_totals[notes[k][0]]), notes[k][1]
+            v["total"], v["note"] = int(kr_totals[notes[k][0]]), notes[k][1]  # numpy 정수 → JSON용 int
         else:
             v["note"] = "직접 고른 대표 목록"
     return out
@@ -188,19 +188,19 @@ def signals(us_px: pd.DataFrame, macro: dict[str, pd.Series]) -> dict:
     hy = macro.get("BAMLH0A0HYM2", pd.Series(dtype=float)).dropna()
     parts, good = [], None
     if len(vix) and len(vxv):
-        calm = vix.iloc[-1] < vxv.iloc[-1]
+        calm = bool(vix.iloc[-1] < vxv.iloc[-1])
         good = calm
         parts.append("단기 불안(VIX)이 중기보다 " + ("낮음" if calm else "높음 — 당장 불안이 큼"))
     if len(hy) > 21:
-        d = hy.iloc[-1] - hy.iloc[-22]
-        ok = d < 0.3
+        d = float(hy.iloc[-1] - hy.iloc[-22])
+        ok = bool(d < 0.3)
         good = ok if good is None else (good and ok)
         parts.append(f"회사채 위험 가산금리 한 달 {'+' if d >= 0 else '−'}{abs(d):.2f}%p" + ("" if ok else " (빠르게 오름)"))
     risk = {"key": "risk", "title": "위험", "good": good, "text": " · ".join(parts) or "데이터 부족"}
     items = [trend, wide, risk]
     known = [i["good"] for i in items if i["good"] is not None]
     state = None if len(known) < 3 else ("green" if all(known) else "yellow" if sum(known) == 2 else "red")
-    return {"state": state, "good": sum(known), "items": items}
+    return {"state": state, "good": int(sum(known)), "items": items}
 
 
 def build_payload(us_px: pd.DataFrame, macro: dict[str, pd.Series], news: list[dict], kr_px: pd.DataFrame | None = None,
