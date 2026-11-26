@@ -11,7 +11,7 @@ __pycache__/
 !.env.example
 .venv/
 .pytest_cache/
-data/
+/data/   # 원본 데이터 폴더(저장소 맨 위)만. 앞의 /가 없으면 app/data(데이터 상태 화면)까지 무시돼 배포에서 404였다
 *.parquet
 .open-next
 .wrangler
