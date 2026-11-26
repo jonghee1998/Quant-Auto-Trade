@@ -41,8 +41,8 @@ def table(rows: list[dict], period: str) -> str:
     p = lambda v, d=1: "—" if v is None else f"{v * 100:+.{d}f}%"  # noqa: E731
     x = lambda v, d=2: "—" if v is None else f"{v:.{d}f}"  # noqa: E731
     out = [f"### 실험실 1차 · 예측 기반 {len(rows)}개 · {period}", "",
-           "| 실험 | 묶음 | 연수익 | S&P | 최악 손실 | S&P | 오른 달/내린 달 | 회복(일) | 매매 | 예측력 | 점수 |",
-           "|---|---|---|---|---|---|---|---|---|---|---|"]
+           "| 실험 | 묶음 | 연수익 | S&P | 최악 손실 | S&P | 오른 달/내린 달 | 회복(일) | 매매 | 예측력 | DSR | 점수 |",
+           "|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for r in sorted(rows, key=lambda r: -r["score"]):
         m = r["m"]
         ic = r.get("ic") or {}
@@ -50,7 +50,7 @@ def table(rows: list[dict], period: str) -> str:
                 else f"적중 {ic['hit'] * 100:.0f}%/기본 {ic['base_rate'] * 100:.0f}%" if ic.get("hit") is not None else "—")
         out.append(f"| {r['id']} | {r['group']} | {p(m.get('cagr'))} | {p(m.get('bench_cagr'))} | {p(m.get('mdd'), 0)} | "
                    f"{p(m.get('bench_mdd'), 0)} | {x(m.get('up_capture'))}/{x(m.get('down_capture'))} | {x(m.get('recovery_days'), 0)} | "
-                   f"{m.get('trades')} | {pred} | {r['score'] * 100:+.1f} |")
+                   f"{m.get('trades')} | {pred} | {x(m.get('dsr'))} | {r['score'] * 100:+.1f} |")
     n = max((r["m"].get("n_trials") or 0) for r in rows) if rows else 0
     out += ["", f"누적 시도 {n}번(DSR 보정에 반영). 연수익은 세금 전(연말 실현 세금은 반영), 비용·환전 포함. "
             "IC = 예측 순위와 실제 다음 기간 초과수익 순위의 상관(0.03 이상이면 쓸모, t 2 이상이면 우연 아닐 가능성)."]
