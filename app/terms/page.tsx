@@ -1,10 +1,9 @@
-import { Proto, Back } from '../../components/ui';
-import { TERMS } from '../../lib/mock';
+import { Back } from '../../components/ui';
+import { TERMS } from '../../lib/terms';
 
 export default function Terms() {
   return (
     <main className="page">
-      <Proto />
       <Back href="/" label="시장" />
       <div className="head" style={{ paddingTop: 0 }}><h1>용어 풀이</h1></div>
       <section className="card">

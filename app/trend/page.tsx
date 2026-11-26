@@ -1,18 +1,7 @@
 import Link from 'next/link';
-import { Proto, TabBar, MarketSeg } from '../../components/ui';
-import { WATCH, PICKS } from '../../lib/mock';
+import { Connecting, Planned, TabBar, MarketSeg } from '../../components/ui';
 import { getMarket } from '../../lib/source';
-import { pct, tone } from '../../lib/format';
 import TrendList from './TrendList';
-
-function Pick({ p, up }: { p: { code: string; name: string; why: string }; up: boolean }) {
-  return (
-    <Link href={`/stock/${p.code}`} className="row" style={{ justifyContent: 'flex-start' }}>
-      <span className={`tag ${up ? 'up' : 'down'}`}>{up ? '▲' : '▼'}</span>
-      <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: 14 }}>{p.name} <span className="muted">{p.code}</span></div><div className="sub">{p.why}</div></div>
-    </Link>
-  );
-}
 
 export const dynamic = 'force-dynamic'; // 배포 때 만든 예시 화면을 재사용하지 않고 요청마다 DB에서 읽는다
 
@@ -20,29 +9,11 @@ export default async function Trend() {
   const d = await getMarket();
   return (
     <main className="page">
-      <Proto sample={d.sample} reason={d.sampleReason} />
       <div className="head"><h1>시장</h1><Link href="/data" className="sub">{d.asOf} 기준</Link></div>
       <MarketSeg on="trend" />
-      <section className="card" style={{ paddingBottom: 4 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between' }}><h2>관심 종목</h2><span className="sub">1개월 · 장기 추세</span></div>
-        {WATCH.map((w) => (
-          <Link key={w.code} href={`/stock/${w.code}`} className="row">
-            <span style={{ color: '#E0A100' }} aria-hidden="true">★</span>
-            <div style={{ flex: 1 }}><div style={{ fontSize: 14 }}>{w.name}</div><div className="muted">{w.code} · {w.meta}</div></div>
-            <span className={`${tone(w.m1)} b`}>{pct(w.m1)}</span>
-            <span className={`tag ${w.above ? 'up' : 'down'}`}>{w.above ? '추세 위' : '추세 아래'}</span>
-          </Link>
-        ))}
-      </section>
-      <section className="card">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}><h2>이번 달 데이터가 고른 것</h2>{!PICKS.verified && <span className="tag warn">검증 전 · 참고만</span>}</div>
-        <div className="sub" style={{ marginTop: 2 }}>기준 전략: {PICKS.strategy} · {PICKS.note}</div>
-        <div className="b up" style={{ fontSize: 13, marginTop: 10 }}>좋은 3</div>
-        {PICKS.good.map((p) => <Pick key={p.code} p={p} up />)}
-        <div className="b down" style={{ fontSize: 13, marginTop: 10 }}>나쁜 3</div>
-        {PICKS.bad.map((p) => <Pick key={p.code} p={p} up={false} />)}
-      </section>
-      <TrendList universe={d.universe} bench={d.bench} />
+      <Planned title="관심 종목" note="종목 상세의 ★로 담아 두면 여기에 1개월 수익률과 장기 추세(200일선 위/아래)가 항상 떠요." />
+      <Planned title="이번 달 데이터가 고른 것" note="실험실에서 검증을 통과한 전략이 생기면, 그 전략이 고른 좋은 3·나쁜 3과 이유가 여기에 떠요." />
+      {d.sample ? <Connecting reason={d.sampleReason} /> : <TrendList universe={d.universe} bench={d.bench} />}
       <div style={{ margin: '12px 16px 0' }}><input type="search" placeholder="목록에 없는 종목 찾기 (전 종목)" aria-label="종목 검색" /></div>
       <TabBar on="market" />
     </main>

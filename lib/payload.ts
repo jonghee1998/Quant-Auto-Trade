@@ -1,5 +1,5 @@
 // daily_brief payload → 화면 데이터. 서버·테스트 공용(의존성 없음).
-import type { Item, Quote } from './mock';
+import type { Item, Quote } from './types';
 
 export type MarketData = {
   sample: boolean;
