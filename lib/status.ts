@@ -22,13 +22,15 @@ export async function getStatus(): Promise<DataStatus | null> {
     // 날짜·소스별로 DB에서 묶어 온다(수천 건을 화면 쪽에서 돌리면 Workers CPU 한도에 걸릴 수 있다)
     const runs = (await sql`
       with r as (
-        select source, (started_at at time zone 'Asia/Seoul')::date as day, status, coalesce(rows, 0) as n, error, started_at
-        from ingest_runs where started_at >= now() - interval '7 days')
-      select source, day::text as day, bool_or(status <> 'failed') as ok, count(*)::int as jobs,
+        select source, dataset, (started_at at time zone 'Asia/Seoul')::date as day, status, coalesce(rows, 0) as n, error, started_at
+        from ingest_runs where started_at >= now() - interval '7 days'),
+      -- 같은 날 같은 데이터를 여러 번 돌렸으면 마지막 결과만 본다(고치기 전 실패가 남아 '일부 실패'로 보이지 않게)
+      l as (select distinct on (source, day, dataset) * from r order by source, day, dataset, started_at desc)
+      select source, day::text as day, bool_and(status <> 'failed') as ok, count(*)::int as jobs,
              (count(*) filter (where status = 'failed'))::int as failed, sum(n)::bigint as n,
              to_char(max(started_at) at time zone 'Asia/Seoul', 'MM/DD HH24:MI') as at,
-             (array_agg(error order by started_at desc) filter (where status = 'failed'))[1] as err
-      from r group by source, day order by source, day desc`) as
+             (array_agg(dataset || ': ' || error order by started_at desc) filter (where status = 'failed'))[1] as err
+      from l group by source, day order by source, day desc`) as
       { source: string; day: string; ok: boolean; jobs: number; failed: number; n: string | number; at: string; err: string | null }[];
     // 각 값은 따로 읽는다: 하나가 느리거나 실패해도 수집 기록은 보이게
     const one = async <T,>(q: Promise<unknown>, pick: (r: Record<string, unknown>) => T): Promise<T | null> => {
