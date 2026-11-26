@@ -60,6 +60,7 @@ jobs:
         part: ${{ fromJSON(needs.prepare.outputs.parts) }}
     permissions:
       contents: read
+      actions: read   # 같은 실행의 artifact(입력) 내려받기
       id-token: write
     steps:
       - uses: actions/checkout@v4
@@ -99,6 +100,7 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
+      actions: read   # 입력·출력 artifact 내려받기
     steps:
       - uses: actions/checkout@v4
         with:
