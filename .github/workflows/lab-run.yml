@@ -32,6 +32,7 @@ jobs:
           STRATEGY: ${{ inputs.strategy }}
           PERIOD: ${{ inputs.period }}
         run: |
+          set -o pipefail  # tee가 파이썬 실패를 가리지 않게
           python -m quant.lab.cli "$STRATEGY" --period "$PERIOD" | tee "$RUNNER_TEMP/card.md"
           cat "$RUNNER_TEMP/card.md" >> "$GITHUB_STEP_SUMMARY"
       - name: Comment on the Issue

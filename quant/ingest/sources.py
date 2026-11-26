@@ -58,10 +58,13 @@ def fred_series(fetch: Fetch, series: str, start: date, api_key: str) -> list[di
     빈티지 기록이 없는 시리즈는 realtime_start가 실제 발표일이 아니라(수년 뒤) → 일간 시리즈는 다음 날,
     그 밖은 35일 뒤로 보수적으로 둔다.
     """
-    data = get_json(fetch, "https://api.stlouisfed.org/fred/series/observations",
-                    {"series_id": series, "observation_start": start.isoformat(), "api_key": api_key, "file_type": "json",
-                     "realtime_start": "1776-07-04", "realtime_end": "9999-12-31", "output_type": 4}, source="fred")
-    lag = timedelta(days=1 if series in FRED_DAILY else 35)
+    params = {"series_id": series, "observation_start": start.isoformat(), "api_key": api_key, "file_type": "json"}
+    daily = series in FRED_DAILY
+    if not daily:
+        # 일간 시장 시리즈는 빈티지가 수천 개라 FRED가 거절(최대 2,000) → 다음 날 발표로 보고 첫 발표값 조회는 월간·주간만
+        params.update({"realtime_start": "1776-07-04", "realtime_end": "9999-12-31", "output_type": 4})
+    data = get_json(fetch, "https://api.stlouisfed.org/fred/series/observations", params, source="fred")
+    lag = timedelta(days=1 if daily else 35)
     rows = []
     for o in data.get("observations", []):
         v = _num(o.get("value"))
@@ -69,7 +72,7 @@ def fred_series(fetch: Fetch, series: str, start: date, api_key: str) -> list[di
             continue
         ref = date.fromisoformat(o["date"])
         rel = date.fromisoformat(o.get("realtime_start") or o["date"])
-        if rel < ref or (rel - ref).days > 60:
+        if daily or rel < ref or (rel - ref).days > 60:
             rel = ref + lag
         rows.append({"series": series, "ref_date": o["date"], "release_date": rel.isoformat(), "value": v, "source": "fred"})
     return rows
