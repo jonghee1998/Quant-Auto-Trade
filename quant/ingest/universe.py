@@ -5,7 +5,9 @@ US_ETFS = ["SOXX", "EWJ", "MCHI", "EWT", "VGK", "INDA", "EWY", "EWZ", "SPY", "VO
 US_NEWS_TICKERS = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA"]
 FRED_SERIES = ["VIXCLS", "VXVCLS", "T10Y3M", "NFCI", "DEXKOUS", "DGS10", "DGS2", "T10Y2Y", "DFF", "BAMLH0A0HYM2", "CPIAUCSL", "UNRATE"]
 KR_NEWS_QUERIES = ["코스피", "코스닥", "환율", "미국 증시"]
-US_STOCKS = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "JPM", "XOM", "UNH"]
+US_STOCK_NAMES = {"AAPL": "애플", "MSFT": "마이크로소프트", "NVDA": "엔비디아", "AMZN": "아마존", "GOOGL": "알파벳",
+                  "META": "메타", "TSLA": "테슬라", "JPM": "JP모건", "XOM": "엑슨모빌", "UNH": "유나이티드헬스"}
+US_STOCKS = list(US_STOCK_NAMES)
 
 # 화면 이름(공개 시장 데이터 이름표)
 SECTORS = {"XLK": "기술", "XLC": "통신", "XLY": "임의소비", "XLF": "금융", "XLI": "산업", "XLV": "헬스케어", "XLP": "필수소비",

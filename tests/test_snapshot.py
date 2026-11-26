@@ -8,7 +8,7 @@ from quant import snapshot as SN
 
 def _px():
     idx = pd.bdate_range("2023-01-02", periods=300)
-    cols = {"SPY": 1.0005, "QQQ": 1.0007, "EWY": 0.9998, "XLK": 1.001, "XLE": 0.999, "EWJ": 1.0003}
+    cols = {"SPY": 1.0005, "QQQ": 1.0007, "EWY": 0.9998, "XLK": 1.001, "XLE": 0.999, "EWJ": 1.0003, "AAPL": 1.0004}
     return pd.DataFrame({c: 100 * g ** np.arange(300) for c, g in cols.items()}, index=idx)
 
 
@@ -25,7 +25,7 @@ def test_build_payload_shape_and_nulls():
     assert p["trendLight"]["state"] == "green"
     assert p["breadth"] == {"above": 1, "total": 2}
     kinds = {(u["market"], u["kind"]) for u in p["universe"]}
-    assert ("US", "업종") in kinds and ("W", "나라") in kinds
+    assert ("US", "업종") in kinds and ("W", "나라") in kinds and ("US", "주식") in kinds
     assert "미국은" in p["summary"] and "VIX" in p["summary"]
     assert [n["where"] for n in p["news"]] == ["미국", "한국"]
 
