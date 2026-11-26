@@ -1,4 +1,4 @@
-import type { Item } from './mock';
+import type { Item } from './types';
 
 export type Market = 'US' | 'KR' | 'W';
 export type Kind = '업종' | '주식';

@@ -1,9 +1,9 @@
 import Link from 'next/link';
-import { Proto, TabBar, MarketSeg, Signed } from '../components/ui';
+import { Connecting, TabBar, MarketSeg, Signed } from '../components/ui';
 import { getMarket } from '../lib/source';
 import { num, pct, moveLabel } from '../lib/format';
 
-export const dynamic = 'force-dynamic'; // 배포 때 만든 예시 화면을 재사용하지 않고 요청마다 DB에서 읽는다
+export const dynamic = 'force-dynamic'; // 배포 때 만든 화면을 재사용하지 않고 요청마다 DB에서 읽는다
 
 export default async function Today() {
   const d = await getMarket();
@@ -11,7 +11,6 @@ export default async function Today() {
   const green = TREND_LIGHT.state === 'green';
   return (
     <main className="page">
-      <Proto sample={d.sample} reason={d.sampleReason} />
       <div className="head">
         <h1>시장</h1>
         <Link href="/data" className="sub" style={{ display: 'flex', alignItems: 'center', gap: 6, height: 44 }}>
@@ -19,6 +18,7 @@ export default async function Today() {
         </Link>
       </div>
       <MarketSeg on="today" />
+      {d.sample ? <Connecting reason={d.sampleReason} /> : <>
       <section className="card dark">
         <div className="sub">오늘 한 줄</div>
         <p style={{ margin: '4px 0 0', fontSize: 17, fontWeight: 700, lineHeight: 1.5 }}>{SUMMARY}</p>
@@ -60,6 +60,7 @@ export default async function Today() {
           <div key={n.title} className="row" style={{ fontSize: 14 }}>{n.title} <span className="sub">{n.where}</span></div>
         ))}
       </section>
+      </>}
       <TabBar on="market" />
     </main>
   );

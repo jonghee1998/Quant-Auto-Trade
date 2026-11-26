@@ -1,9 +1,9 @@
 // daily_brief payload → 화면 데이터. 서버·테스트 공용(의존성 없음).
-import type { Item, Quote } from './mock';
+import type { Item, Quote } from './types';
 
 export type MarketData = {
   sample: boolean;
-  /** 예시 값을 보여주는 이유(진단용, 비밀값 없음) */
+  /** 데이터를 못 읽은 이유(진단용, 비밀값 없음) */
   sampleReason?: 'DB 미설정' | 'DB 연결 실패' | '요약 없음';
   asOf: string;
   summary: string;

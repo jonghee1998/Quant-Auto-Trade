@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import Link from 'next/link';
-import type { Item, Bench } from '../../lib/mock';
+import type { Item, Bench } from '../../lib/types';
 import { rankItems, barSpan, type Market, type Kind } from '../../lib/trend';
 import { pct, tone } from '../../lib/format';
 
