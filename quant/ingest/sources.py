@@ -86,8 +86,16 @@ KR_ENDPOINTS = {
 }
 
 
+def kr_service_key(key: str) -> str:
+    """포털의 '인코딩 키'(%2B 등)를 넣어도 두 번 인코딩되지 않게 원래 키로 되돌린다."""
+    from urllib.parse import unquote
+    key = key.strip()
+    return unquote(key) if "%" in key else key
+
+
 def kr_daily(fetch: Fetch, kind: str, bas_dt: date, service_key: str, page_size: int = 1000) -> list[dict]:
     """하루치 전 종목(페이지 반복). T+1 13시 이후 반영."""
+    service_key = kr_service_key(service_key)
     rows, page = [], 1
     while True:
         data = get_json(fetch, KR_ENDPOINTS[kind],

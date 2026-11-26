@@ -159,3 +159,9 @@ def test_run_sources_filter():
     out = []
     run({"FRED_API_KEY": "FAKEKEY1", "FINNHUB_TOKEN": "FAKEKEY2"}, fetch, None, today=date(2024, 1, 5), out=out.append, sources={"fred"})
     assert calls and all("stlouisfed" in u for u in calls)
+
+
+def test_kr_service_key_undoes_portal_encoding():
+    # 가짜 키: 인코딩 형태와 디코딩 형태가 같은 값으로 보내져야 한다
+    assert S.kr_service_key("FAKE%2Babc%3D%3D") == "FAKE+abc=="
+    assert S.kr_service_key(" FAKE+abc== ") == "FAKE+abc=="
