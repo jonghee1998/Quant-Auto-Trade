@@ -51,3 +51,12 @@ def test_pick_kr_by_traded_value_and_excludes_leveraged():
     kinds = {(u["market"], u["kind"]) for u in p["universe"]}
     assert ("KR", "주식") in kinds and ("KR", "업종") in kinds
     assert p["bench"]["KR"][0] is not None
+
+
+def test_pick_news_balances_and_dedupes():
+    news = [{"title": f"합성 미국 {i}", "source": "finnhub"} for i in range(5)]
+    news += [{"title": "합성 증시 마감", "source": "google_news"}, {"title": "합성 증시 마감!", "source": "google_news"},
+             {"title": "합성 환율", "source": "google_news"}]
+    p = SN.pick_news(news)
+    assert [x["where"] for x in p] == ["미국"] * 3 + ["한국"] * 2
+    assert [x["title"] for x in p if x["where"] == "한국"] == ["합성 증시 마감", "합성 환율"]

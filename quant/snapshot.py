@@ -106,6 +106,25 @@ def pick_kr(rows: pd.DataFrame, n_stock: int = 300, n_etf: int = 100) -> tuple[p
     return px, stocks, etfs
 
 
+KR_NEWS_SOURCES = {"naver", "google_news"}
+
+
+def pick_news(news: list[dict], n_us: int = 3, n_kr: int = 2) -> list[dict]:
+    """홈 뉴스: 최신순으로 미국 n_us·한국 n_kr. 언론사만 다르고 같은 제목은 하나로."""
+    from .news_features import norm_title
+    seen, us, kr = set(), [], []
+    for x in news:
+        key = norm_title(x["title"])[:30]
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        is_kr = x.get("source") in KR_NEWS_SOURCES
+        bucket, cap = (kr, n_kr) if is_kr else (us, n_us)
+        if len(bucket) < cap:
+            bucket.append({"title": x["title"], "where": "한국" if is_kr else "미국"})
+    return us + kr
+
+
 def build_payload(us_px: pd.DataFrame, macro: dict[str, pd.Series], news: list[dict], kr_px: pd.DataFrame | None = None,
                   kr_names: dict | None = None, as_of: str | None = None, kr_etf_names: dict | None = None) -> dict:
     quotes = []
@@ -128,7 +147,7 @@ def build_payload(us_px: pd.DataFrame, macro: dict[str, pd.Series], news: list[d
         "trendLight": {"state": light["state"], "gapPct": _f(light["gap_pct"])},
         "breadth": MK.breadth(us_px[sectors]) if sectors else {"above": 0, "total": 0},
         "universe": universe, "bench": {"US": bench_us, "W": bench_us, "KR": bench_kr},
-        "news": [{"title": n["title"], "where": "한국" if n.get("source") == "naver" else "미국"} for n in news[:5]],
+        "news": pick_news(news),
     }
 
 
@@ -148,7 +167,11 @@ def load_from_db(conn, days: int = 400) -> tuple[pd.DataFrame, dict, list[dict]]
         cur.execute("""select distinct on (series, ref_date) series, ref_date, value from macro_series
                        where ref_date >= current_date - %s order by series, ref_date, release_date desc""", (days,))
         mc = pd.DataFrame(cur.fetchall(), columns=["series", "date", "value"])
-        cur.execute("select title, source from news order by published_at desc limit 20")
+        # 미국 뉴스가 하루 수백 건이라 최신 N건만 보면 한국이 밀려난다 → 한국/미국 따로 최신 50건씩
+        cur.execute("""select title, source from (
+                         select title, source, published_at, row_number() over (
+                           partition by source in ('naver', 'google_news') order by published_at desc) as rn from news) t
+                       where rn <= 50 order by published_at desc""")
         news = [{"title": t, "source": s} for t, s in cur.fetchall()]
     us = px.pivot(index="date", columns="code", values="close").sort_index() if len(px) else pd.DataFrame()
     us.index = pd.to_datetime(us.index)

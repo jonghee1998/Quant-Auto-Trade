@@ -41,6 +41,8 @@ def plan(env: dict, today: date, days: int, kr_have: set[tuple[str, str]] | None
                 if (kind, str(d)) in kr_have:
                     continue
                 jobs.append(("data.go.kr", f"{kind}:{d}", lambda f, kind=kind, d=d: S.kr_daily(f, kind, d, env["DATA_GO_KR_KEY"]), "prices"))
+    for q in U.KR_NEWS_QUERIES:  # 키 없는 한국 헤드라인(네이버 키가 없을 때의 기본)
+        jobs.append(("google_news", q, lambda f, q=q: S.google_news(f, q), "news"))
     if env.get("NAVER_CLIENT_ID") and env.get("NAVER_CLIENT_SECRET"):
         for q in U.KR_NEWS_QUERIES:
             jobs.append(("naver", q, lambda f, q=q: S.naver_news(f, q, env["NAVER_CLIENT_ID"], env["NAVER_CLIENT_SECRET"]), "news"))
@@ -139,7 +141,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--days", type=int, default=5)
     ap.add_argument("--budget-min", type=float, default=20, help="수집에 쓸 최대 분(Actions 제한 30분보다 작게)")
-    ap.add_argument("--sources", default="", help="쉼표 구분: tiingo,fred,data.go.kr,naver,finnhub,sec (빈칸=전부)")
+    ap.add_argument("--sources", default="", help="쉼표 구분: tiingo,fred,data.go.kr,google_news,naver,finnhub,sec (빈칸=전부)")
     a = ap.parse_args()
     env = dict(os.environ)
     conn = None
