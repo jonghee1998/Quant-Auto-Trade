@@ -14,13 +14,13 @@ function Pick({ p, up }: { p: { code: string; name: string; why: string }; up: b
   );
 }
 
-export const revalidate = 600;
+export const dynamic = 'force-dynamic'; // 배포 때 만든 예시 화면을 재사용하지 않고 요청마다 DB에서 읽는다
 
 export default async function Trend() {
   const d = await getMarket();
   return (
     <main className="page">
-      <Proto sample={d.sample} />
+      <Proto sample={d.sample} reason={d.sampleReason} />
       <div className="head"><h1>시장</h1><Link href="/data" className="sub">{d.asOf} 기준</Link></div>
       <MarketSeg on="trend" />
       <section className="card" style={{ paddingBottom: 4 }}>

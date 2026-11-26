@@ -1,8 +1,8 @@
 import Link from 'next/link';
 import { tone, type Num } from '../lib/format';
 
-export function Proto({ sample = true }: { sample?: boolean }) {
-  return sample ? <div className="proto">프로토타입 · 모든 숫자는 예시 값</div> : null;
+export function Proto({ sample = true, reason }: { sample?: boolean; reason?: string }) {
+  return sample ? <div className="proto">프로토타입 · 모든 숫자는 예시 값{reason ? ` (${reason})` : ''}</div> : null;
 }
 
 export function TabBar({ on }: { on: 'market' | 'invest' }) {
