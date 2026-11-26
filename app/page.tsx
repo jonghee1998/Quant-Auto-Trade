@@ -3,7 +3,7 @@ import { Proto, TabBar, MarketSeg, Signed } from '../components/ui';
 import { getMarket } from '../lib/source';
 import { num, pct, moveLabel } from '../lib/format';
 
-export const revalidate = 600;
+export const dynamic = 'force-dynamic'; // 배포 때 만든 예시 화면을 재사용하지 않고 요청마다 DB에서 읽는다
 
 export default async function Today() {
   const d = await getMarket();
@@ -11,7 +11,7 @@ export default async function Today() {
   const green = TREND_LIGHT.state === 'green';
   return (
     <main className="page">
-      <Proto sample={d.sample} />
+      <Proto sample={d.sample} reason={d.sampleReason} />
       <div className="head">
         <h1>시장</h1>
         <Link href="/data" className="sub" style={{ display: 'flex', alignItems: 'center', gap: 6, height: 44 }}>

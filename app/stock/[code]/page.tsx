@@ -3,6 +3,8 @@ import { Proto, Back } from '../../../components/ui';
 import { getMarket } from '../../../lib/source';
 import { pct, pp, tone } from '../../../lib/format';
 
+export const dynamic = 'force-dynamic';
+
 export default async function Stock({ params }: { params: Promise<{ code: string }> }) {
   const { code } = await params;
   const d = await getMarket();
@@ -11,7 +13,7 @@ export default async function Stock({ params }: { params: Promise<{ code: string
   const b = d.bench[item?.market ?? 'US'];
   return (
     <main className="page">
-      <Proto sample={d.sample} />
+      <Proto sample={d.sample} reason={d.sampleReason} />
       <Back href="/trend" label="트렌드" />
       <div style={{ padding: '0 16px' }}>
         <div className="sub">{code} · {item ? `${item.market === 'KR' ? '한국' : '미국'} · ${item.kind}` : '정보 없음'}</div>
