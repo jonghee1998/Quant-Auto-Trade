@@ -93,7 +93,8 @@ def build_payload(us_px: pd.DataFrame, macro: dict[str, pd.Series], news: list[d
     spy = us_px["SPY"] if "SPY" in us_px else pd.Series(dtype=float)
     light = MK.trend_light(spy)
     bench_us = [_ret(spy, d) for d in (21, 63, 126)]
-    universe = universe_rows(us_px, U.SECTORS, "업종", "US") + universe_rows(us_px, U.COUNTRIES, "나라", "W")
+    universe = (universe_rows(us_px, U.SECTORS, "업종", "US") + universe_rows(us_px, U.US_STOCK_NAMES, "주식", "US")
+                + universe_rows(us_px, U.COUNTRIES, "나라", "W"))
     bench_kr = [None, None, None]
     if kr_px is not None and kr_names:
         universe += universe_rows(kr_px, kr_names, "주식", "KR")

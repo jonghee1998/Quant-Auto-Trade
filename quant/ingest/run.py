@@ -25,7 +25,7 @@ def plan(env: dict, today: date, days: int) -> list[tuple[str, str, Callable[[Fe
     start = today - timedelta(days=days)
     jobs = []
     if env.get("TIINGO_TOKEN"):
-        for t in U.US_ETFS:
+        for t in U.US_ETFS + U.US_STOCKS:  # 주식도 시세가 있어야 트렌드의 '주식'이 채워진다
             jobs.append(("tiingo", t, lambda f, t=t: S.tiingo_daily(f, t, start, today, env["TIINGO_TOKEN"]), "prices"))
     if env.get("FRED_API_KEY"):
         for s in U.FRED_SERIES:

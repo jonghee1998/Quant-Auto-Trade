@@ -191,3 +191,10 @@ def test_run_stops_starting_jobs_after_time_budget():
     from quant.ingest.universe import FRED_SERIES
     assert s["ok"] == 3 and s["skipped"] == len(FRED_SERIES) - 3
     assert any("시간 부족" in o for o in out) and "건너뜀" in out[-1]
+
+
+def test_plan_collects_us_stock_prices():
+    from quant.ingest.run import plan
+    from quant.ingest.universe import US_STOCKS
+    codes = {d for s, d, _, k in plan({"TIINGO_TOKEN": "FAKE"}, date(2024, 1, 5), 5) if s == "tiingo"}
+    assert set(US_STOCKS) <= codes
