@@ -319,3 +319,17 @@ def test_google_news_english_is_us_source():
     f = FakeFetch((200, GOOGLE_RSS))
     [r] = S.google_news(f, "stock market", "en")
     assert r["source"] == "google_news_en" and f.calls[0][1]["ceid"] == "US:en"
+
+
+
+def test_sec_uses_all_revenue_tags_with_priority():
+    from quant.ingest import sec
+    def item(end, start, val, filed):
+        return {"start": start, "end": end, "val": val, "filed": filed, "form": "10-Q", "fy": 2024, "fp": "Q2"}
+    facts = {"facts": {"us-gaap": {
+        "Revenues": {"units": {"USD": [item("2022-06-30", "2022-04-01", 50, "2022-08-01")]}},
+        "RevenueFromContractWithCustomerExcludingAssessedTax": {"units": {"USD": [
+            item("2024-06-30", "2024-04-01", 100, "2024-08-01"), item("2022-06-30", "2022-04-01", 49, "2022-08-01")]}}}}}
+    rows = sec.company_facts(FakeFetch((200, facts)), 1, "TEST", "합성 test@example.com")
+    rev = sorted((r["period_end"], r["value"]) for r in rows if r["concept"] == "revenue")
+    assert rev == [("2022-06-30", 50.0), ("2024-06-30", 100.0)]  # 새 태그 기간도 받고, 겹치면 앞 태그
