@@ -201,15 +201,15 @@ def test_plan_collects_us_stock_prices():
 
 
 def test_plan_skips_kr_dates_already_stored():
-    # 시간 예산으로 끊겨도 다음 실행이 이어서 받도록: 이미 받은 날짜는 계획에서 뺀다
+    # 시간 예산으로 끊겨도 다음 실행이 이어서 받도록: 이미 받은 날짜는 뺀다. 단 최근 5일은 늘 다시(정정·상장주식수)
     from quant.ingest.run import plan
     env = {"DATA_GO_KR_KEY": "FAKE"}
-    full = [d for s, d, _, _ in plan(env, date(2024, 1, 5), 2) if s == "data.go.kr" and not d.startswith("index:")]
-    assert full == ["stock:2024-01-04", "etf:2024-01-04", "stock:2024-01-03", "etf:2024-01-03"]
-    part = [d for s, d, _, _ in plan(env, date(2024, 1, 5), 2, {("stock", "2024-01-04"), ("etf", "2024-01-03")})
-            if s == "data.go.kr" and not d.startswith("index:")]
-    assert part == ["etf:2024-01-04", "stock:2024-01-03"]
-
+    def daily(have):
+        return [d for s, d, _, _ in plan(env, date(2024, 1, 10), 7, have) if s == "data.go.kr" and not d.startswith("index:")]
+    assert daily(set())[-2:] == ["stock:2024-01-03", "etf:2024-01-03"] and len(daily(set())) == 14
+    have = {("stock", "2024-01-03"), ("etf", "2024-01-04"), ("stock", "2024-01-08")}  # 1/8은 최근 5일 → 그래도 받음
+    got = daily(have)
+    assert "stock:2024-01-03" not in got and "etf:2024-01-04" not in got and "stock:2024-01-08" in got
 
 def test_kr_jobs_fetch_in_parallel_and_report_in_order():
     # 하루치가 몇 분 걸리는 data.go.kr: 여러 날짜를 동시에 받되 결과 줄은 계획 순서대로
@@ -333,3 +333,11 @@ def test_sec_uses_all_revenue_tags_with_priority():
     rows = sec.company_facts(FakeFetch((200, facts)), 1, "TEST", "합성 test@example.com")
     rev = sorted((r["period_end"], r["value"]) for r in rows if r["concept"] == "revenue")
     assert rev == [("2022-06-30", 50.0), ("2024-06-30", 100.0)]  # 새 태그 기간도 받고, 겹치면 앞 태그
+
+
+
+def test_kr_daily_shares_only_when_asked():
+    body = {"response": {"body": {"totalCount": 1, "items": {"item": [
+        {"basDt": "20240102", "srtnCd": "TEST01", "itmsNm": "가짜종목A", "clpr": "100", "lstgStCnt": "1,000"}]}}}}
+    assert "shares" not in S.kr_daily(FakeFetch((200, body)), "stock", date(2024, 1, 2), "FAKE")[0]
+    assert S.kr_daily(FakeFetch((200, body)), "stock", date(2024, 1, 2), "FAKE", with_shares=True)[0]["shares"] == 1000.0

@@ -77,7 +77,7 @@ export default async function Stock({ params, searchParams }: { params: Promise<
           <h2>재무 <span className="sub" style={{ fontWeight: 400 }}>{item.market === 'KR' ? '전자공시(OpenDART)' : '미국 SEC 공시'} · {f.filed} 접수분까지</span></h2>
           {(f.per != null || f.pbr != null) && (
             <div style={{ display: 'flex', gap: 16, marginTop: 8, fontSize: 13 }}>
-            <span>PER <b>{f.per ?? '—'}</b>{f.epsYear ? <span className="sub"> ({f.epsYear} 연간 이익 기준)</span> : null}</span>
+            <span>PER <b>{f.per ?? '—'}</b>{f.perBasis ? <span className="sub"> ({f.perBasis})</span> : null}</span>
             <span>PBR <b>{f.pbr ?? '—'}</b></span>
             </div>
           )}
@@ -87,7 +87,7 @@ export default async function Stock({ params, searchParams }: { params: Promise<
               <Quarter key={q.end} q={q} op={KR} />
             ))}
           </div>
-          <div className="sub" style={{ marginTop: 8, lineHeight: 1.5 }}>{KR ? '단위 억 원. 연결 재무 기준(없으면 개별). 4분기 = 1년 − 3분기 누적.' : '단위 억 달러. PER = 주가 ÷ 1년 이익(낮을수록 이익 대비 싸다), PBR = 주가 ÷ 장부상 순자산.'}</div>
+          <div className="sub" style={{ marginTop: 8, lineHeight: 1.5 }}>{KR ? '단위 억 원. 연결 재무 기준(없으면 개별). 4분기 = 1년 − 3분기 누적.' : '단위 억 달러.'} PER = 시가총액 ÷ 1년 이익(낮을수록 이익 대비 싸다), PBR = 시가총액 ÷ 장부상 순자산.</div>
         </section>
       ) : <Connecting reason="재무는 다음 수집 뒤 채워져요" />) : item && (
         null

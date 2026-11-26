@@ -52,7 +52,7 @@ def test_fundamentals_quarters_yoy_per_pbr_and_restatement():
     f = DT.fundamentals_view(pd.DataFrame(rows), price=50.0)
     last = f["quarters"][-1]
     assert last["end"] == "2024-06-30" and last["revenue"] == 143 and last["revYoY"] == 30.0  # 143/110
-    assert f["per"] == 10.0 and f["epsYear"] == "2023" and f["pbr"] == 5.0
+    assert f["per"] == 10.0 and f["perBasis"] == "2023 연간 이익 기준" and f["pbr"] == 5.0
 
 
 def test_build_is_json_safe():
@@ -74,3 +74,12 @@ def test_fundamentals_q4_from_annual_minus_nine_months():
     ]
     q = DT.fundamentals_view(pd.DataFrame(rows), price=None)["quarters"]
     assert [(x["end"], x["revenue"]) for x in q] == [("2023-10-29", 110), ("2024-01-28", 120)]
+
+
+def test_per_from_market_cap_and_last_four_quarters():
+    T = pd.Timestamp
+    rows = [{"concept": "net_income", "period_start": e - pd.Timedelta(days=89), "period_end": e, "value": 25, "filed_date": e + pd.Timedelta(days=40)}
+            for e in [T("2024-03-31"), T("2024-06-30"), T("2024-09-30"), T("2024-12-31")]]
+    rows.append({"concept": "shares", "period_start": None, "period_end": T("2025-01-10"), "value": 10, "filed_date": T("2025-01-10")})
+    f = DT.fundamentals_view(pd.DataFrame(rows), price=100.0)
+    assert f["per"] == 10.0 and f["perBasis"] == "최근 4분기 이익 기준"  # 1000 / 100

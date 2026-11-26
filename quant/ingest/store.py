@@ -40,7 +40,25 @@ def upsert_prices(conn, rows: list[dict]) -> int:
                  volume = excluded.volume, source = excluded.source""",
             [(ids[(r["market"], r["code"])], r["date"], r.get("open"), r.get("high"), r.get("low"), r["close"],
               r.get("adj_factor", 1.0), r.get("volume"), r["source"]) for r in rows])
+    if any(r.get("shares") for r in rows):
+        upsert_kr_shares(conn, rows)
     return len(rows)
+
+
+def upsert_kr_shares(conn, rows: list[dict]) -> int:
+    """한국 상장주식수: 바뀐 날만 한 줄(매일 4천 행이 쌓이지 않게). 그날 시세 발표로 알 수 있었던 값이라 접수일 = 그날."""
+    new = {r["code"]: (r["date"], r["shares"]) for r in rows if r.get("shares")}
+    with conn.cursor() as cur:
+        cur.execute("""select distinct on (code) code, value from fundamentals where market = 'KR' and concept = 'shares'
+                       and code = any(%s) order by code, period_end desc""", (list(new),))
+        have = dict(cur.fetchall())
+        todo = [(c, d, v) for c, (d, v) in new.items() if have.get(c) != v]
+        cur.executemany(
+            """insert into fundamentals (market, code, concept, unit, period_start, period_end, period_days, fiscal_period, value,
+                 filed_date, form, source) values ('KR', %s, 'shares', 'shares', null, %s, 0, null, %s, %s, 'data.go.kr', 'data.go.kr')
+               on conflict (market, code, concept, unit, period_end, period_days, filed_date) do update set value = excluded.value""",
+            [(c, d, v, d) for c, d, v in todo])
+    return len(todo)
 
 
 def upsert_macro(conn, rows: list[dict]) -> int:

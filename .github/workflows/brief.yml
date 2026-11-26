@@ -36,15 +36,18 @@ jobs:
       - name: Prepare
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: python -m quant.brief.run prepare --dir brief-io
+          SKIP: ${{ github.event_name == 'workflow_run' && '--skip-if-done' || '' }}
+        run: python -m quant.brief.run prepare --dir brief-io $SKIP
       - id: parts
         env:
           PARTS: ${{ inputs.parts || '' }}
         run: |
           all='["main","why-kr-stock","why-kr-etf","why-us"]'
+          if [ ! -f brief-io/in-main.json ]; then echo 'json=[]' >> "$GITHUB_OUTPUT"; exit 0; fi  # 이미 씀 → 건너뜀
           if [ -z "$PARTS" ]; then echo "json=$all" >> "$GITHUB_OUTPUT"; else
             echo "json=$(python3 -c 'import json,os;print(json.dumps([p.strip() for p in os.environ["PARTS"].split(",") if p.strip()]))')" >> "$GITHUB_OUTPUT"; fi
       - uses: actions/upload-artifact@v4
+        if: steps.parts.outputs.json != '[]'
         with:
           name: brief-in
           path: brief-io/
@@ -53,6 +56,7 @@ jobs:
 
   write:
     needs: prepare
+    if: needs.prepare.outputs.parts != '[]'
     runs-on: ubuntu-latest
     timeout-minutes: 75
     strategy:
@@ -96,7 +100,7 @@ jobs:
 
   save:
     needs: [prepare, write]
-    if: always() && needs.prepare.result == 'success'
+    if: always() && needs.prepare.result == 'success' && needs.prepare.outputs.parts != '[]'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

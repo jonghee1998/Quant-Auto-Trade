@@ -120,3 +120,17 @@ def test_fundamentals_quarter_and_ytd_same_end_both_kept(conn):
     with conn.cursor() as cur:
         cur.execute("select period_days, value from fundamentals where code = 'TEST02' order by period_days")
         assert cur.fetchall() == [(90, 100.0), (181, 190.0)]
+
+
+
+def test_kr_shares_only_when_changed(conn):
+    from quant.ingest import store
+    def rows(d, n):
+        return [{"market": "KR", "code": "TEST03", "name": "가짜종목C", "kind": "stock", "date": d, "close": 1.0,
+                 "source": "test", "shares": n}]
+    store.upsert_prices(conn, rows("2024-01-02", 100.0))
+    store.upsert_prices(conn, rows("2024-01-03", 100.0))  # 같으면 안 쌓임
+    store.upsert_prices(conn, rows("2024-01-04", 120.0))
+    with conn.cursor() as cur:
+        cur.execute("select period_end::text, value from fundamentals where code = 'TEST03' and concept = 'shares' order by 1")
+        assert cur.fetchall() == [("2024-01-02", 100.0), ("2024-01-04", 120.0)]
