@@ -208,3 +208,31 @@ def test_plan_skips_kr_dates_already_stored():
     assert full == ["stock:2024-01-04", "etf:2024-01-04", "stock:2024-01-03", "etf:2024-01-03"]
     part = [d for s, d, _, _ in plan(env, date(2024, 1, 5), 2, {("stock", "2024-01-04"), ("etf", "2024-01-03")}) if s == "data.go.kr"]
     assert part == ["etf:2024-01-04", "stock:2024-01-03"]
+
+
+def test_kr_jobs_fetch_in_parallel_and_report_in_order():
+    # 하루치가 몇 분 걸리는 data.go.kr: 여러 날짜를 동시에 받되 결과 줄은 계획 순서대로
+    import threading
+    from quant.ingest.run import run
+    live, peak, lock = [0], [0], threading.Lock()
+    gate = threading.Barrier(4, timeout=5)
+
+    def fetch(url, params=None, headers=None):
+        with lock:
+            live[0] += 1
+            peak[0] = max(peak[0], live[0])
+        try:
+            gate.wait()  # 4개가 동시에 들어와야 통과
+        except threading.BrokenBarrierError:
+            pass
+        with lock:
+            live[0] -= 1
+        d = params["basDt"]
+        body = {"response": {"body": {"totalCount": 1, "items": {"item": [
+            {"basDt": d, "srtnCd": "TEST01", "itmsNm": "가짜종목A", "clpr": "100"}]}}}}
+        return Response(200, json.dumps(body))
+    out = []
+    s = run({"DATA_GO_KR_KEY": "FAKE"}, fetch, None, today=date(2024, 1, 5), days=2, out=out.append)
+    assert s["ok"] == 4 and peak[0] == 4
+    lines = [o.split(":")[0] + ":" + o.split(":")[1] for o in out if o.startswith("data.go.kr")]
+    assert [x.split()[1] for x in lines] == ["stock:2024-01-04", "etf:2024-01-04", "stock:2024-01-03", "etf:2024-01-03"]
