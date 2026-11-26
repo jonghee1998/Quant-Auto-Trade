@@ -58,11 +58,14 @@ def _fundamentals(conn, codes: list[str]) -> dict[str, list[dict]]:
     return out
 
 
-def prepare(conn, d: Path) -> dict[str, int]:
+def prepare(conn, d: Path, force: bool = True) -> dict[str, int]:
+    """force=False(예약 실행): 이 날짜 데이터로 이미 썼으면 아무것도 안 만든다(빈 dict)."""
     day, payload = _latest(conn)
     if not payload:
         raise SystemExit("daily_brief 없음")
     d.mkdir(parents=True, exist_ok=True)
+    if not force and (payload.get("ai") or {}).get("date") == str(day):
+        return {}
     clusters = cluster_news(_news(conn, 36))
     us = [c for c in clusters if c["where"] == "미국"][:40]
     kr = [c for c in clusters if c["where"] == "한국"][:40]
@@ -102,7 +105,7 @@ def save(conn, d: Path, out=print) -> dict[str, str]:
     for k, v in status.items():
         out(f"{k}: {v}")
     if parts:
-        new = merge(payload, parts)
+        new = merge(payload, parts, data_date=str(day))
         with conn.cursor() as cur:
             cur.execute("update daily_brief set payload = %s where date = %s", (json.dumps(new, ensure_ascii=False), day))
         conn.commit()
@@ -113,11 +116,13 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=["prepare", "save"])
     ap.add_argument("--dir", default="brief-io")
+    ap.add_argument("--skip-if-done", action="store_true", help="이 날짜 데이터로 이미 썼으면 건너뜀(예약 실행)")
     a = ap.parse_args()
     import psycopg
     with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
         if a.cmd == "prepare":
-            print("입력:", prepare(conn, Path(a.dir)))
+            sizes = prepare(conn, Path(a.dir), force=not a.skip_if_done)
+            print("입력:", sizes or "이미 이 날짜 데이터로 씀 — 건너뜀")
             return 0
         st = save(conn, Path(a.dir))
         return 0 if any(v.startswith("ok") for v in st.values()) else 1

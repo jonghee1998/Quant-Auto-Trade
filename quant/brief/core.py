@@ -164,7 +164,7 @@ def check_why(out: dict, inp: dict) -> dict:
     return {"items": items}
 
 
-def merge(payload: dict, parts: dict[str, dict], generated_at: str | None = None) -> dict:
+def merge(payload: dict, parts: dict[str, dict], generated_at: str | None = None, data_date: str | None = None) -> dict:
     """검사한 부분들을 payload["ai"]에 넣는다. 이번에 없는 부분은 이전 값을 그대로 둔다(일부 실패해도 나머지는 살림)."""
     ai = dict(payload.get("ai") or {})
     if "main" in parts:
@@ -175,4 +175,6 @@ def merge(payload: dict, parts: dict[str, dict], generated_at: str | None = None
             why.update(part["items"])
     ai["why"] = why
     ai["generatedAt"] = generated_at or datetime.now().astimezone().isoformat(timespec="minutes")
+    if data_date:
+        ai["date"] = data_date  # 어느 날 데이터로 썼나(같은 데이터면 예약 실행이 다시 쓰지 않게)
     return {**payload, "ai": ai}

@@ -41,9 +41,10 @@ def plan(env: dict, today: date, days: int, kr_have: set[tuple[str, str]] | None
         for k in range(1, min(days, KR_DAILY_MAX_DAYS) + 1):  # 영업일 여부는 응답으로 판단(빈 응답이면 0건)
             d = today - timedelta(days=k)
             for kind in ("stock", "etf"):
-                if (kind, str(d)) in kr_have:
+                if k > 5 and (kind, str(d)) in kr_have:  # 최근 5일은 늘 다시 받는다(정정 반영, 상장주식수 기록)
                     continue
-                jobs.append(("data.go.kr", f"{kind}:{d}", lambda f, kind=kind, d=d: S.kr_daily(f, kind, d, env["DATA_GO_KR_KEY"]), "prices"))
+                jobs.append(("data.go.kr", f"{kind}:{d}", lambda f, kind=kind, d=d, k=k: S.kr_daily(
+                    f, kind, d, env["DATA_GO_KR_KEY"], with_shares=k <= 5), "prices"))
     for q in U.KR_NEWS_QUERIES:  # 키 없는 한국 헤드라인(네이버 키가 없을 때의 기본)
         jobs.append(("google_news", q, lambda f, q=q: S.google_news(f, q), "news"))
     for q in U.US_NEWS_QUERIES:

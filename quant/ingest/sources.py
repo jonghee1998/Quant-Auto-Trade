@@ -139,8 +139,9 @@ def kr_service_key(key: str) -> str:
     return unquote(key) if "%" in key else key
 
 
-def kr_daily(fetch: Fetch, kind: str, bas_dt: date, service_key: str, page_size: int = 1000) -> list[dict]:
-    """하루치 전 종목(페이지 반복). T+1 13시 이후 반영."""
+def kr_daily(fetch: Fetch, kind: str, bas_dt: date, service_key: str, page_size: int = 1000,
+             with_shares: bool = False) -> list[dict]:
+    """하루치 전 종목(페이지 반복). T+1 13시 이후 반영. with_shares: 상장주식수(lstgStCnt)도 담는다(PER·PBR용)."""
     service_key = kr_service_key(service_key)
     rows, page = [], 1
     while True:
@@ -159,7 +160,8 @@ def kr_daily(fetch: Fetch, kind: str, bas_dt: date, service_key: str, page_size:
             rows.append({"market": "KR", "code": it["srtnCd"], "name": it.get("itmsNm"), "kind": kind,
                          "date": f"{d[:4]}-{d[4:6]}-{d[6:]}", "open": _num(it.get("mkp")),
                          "high": _num(it.get("hipr")), "low": _num(it.get("lopr")), "close": close,
-                         "adj_factor": 1.0, "volume": _num(it.get("trqu")), "source": "data.go.kr"})
+                         "adj_factor": 1.0, "volume": _num(it.get("trqu")), "source": "data.go.kr",
+                         **({"shares": _num(it.get("lstgStCnt"))} if with_shares and kind == "stock" else {})})
         total = int(body.get("totalCount") or 0)
         if page * page_size >= total or not items:
             return rows

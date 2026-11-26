@@ -72,3 +72,8 @@ def test_cluster_korean_titles_despite_particles():
     c = B.cluster_news(rows)
     assert c[0]["outlets"] == 3 and c[0]["where"] == "한국"
     assert len(c) == 2
+
+
+def test_merge_records_data_date():
+    p = B.merge({}, {"main": {"today": {}, "market": {}, "news": []}}, generated_at="t", data_date="2024-01-02")
+    assert p["ai"]["date"] == "2024-01-02"

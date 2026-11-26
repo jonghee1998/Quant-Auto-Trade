@@ -104,14 +104,20 @@ def fundamentals_view(rows: pd.DataFrame, price: float | None) -> dict:
         out["quarters"].append({
             "end": d.strftime("%Y-%m-%d"), "revenue": _f(rev[d], 0), "netIncome": _f(ni.get(d), 0), "opIncome": _f(op.get(d), 0),
             "revYoY": _f((rev[d] / prev.iloc[-1] - 1) * 100, 1) if len(prev) and prev.iloc[-1] > 0 else None})
-    eps = rows[(rows["concept"] == "eps_diluted") & rows["len"].between(350, 380)].sort_values("period_end")
-    if price and len(eps) and eps["value"].iloc[-1] > 0:
-        out["per"] = _f(price / eps["value"].iloc[-1], 1)
-        out["epsYear"] = eps["period_end"].iloc[-1].strftime("%Y")
     eq = rows[rows["concept"] == "equity"].sort_values("period_end")
     sh = rows[rows["concept"] == "shares"].sort_values("period_end")
-    if price and len(eq) and len(sh) and sh["value"].iloc[-1] > 0 and eq["value"].iloc[-1] > 0:
-        out["pbr"] = _f(price / (eq["value"].iloc[-1] / sh["value"].iloc[-1]), 1)
+    mcap = price * sh["value"].iloc[-1] if price and len(sh) and sh["value"].iloc[-1] > 0 else None
+    last4 = ni.iloc[-4:]
+    if mcap and len(last4) == 4 and (last4.index[-1] - last4.index[0]).days <= 300 and last4.sum() > 0:
+        out["per"] = _f(mcap / last4.sum(), 1)  # 시가총액 ÷ 최근 4분기 순이익
+        out["perBasis"] = "최근 4분기 이익 기준"
+    else:
+        eps = rows[(rows["concept"] == "eps_diluted") & rows["len"].between(350, 380)].sort_values("period_end")
+        if price and len(eps) and eps["value"].iloc[-1] > 0:
+            out["per"] = _f(price / eps["value"].iloc[-1], 1)
+            out["perBasis"] = f"{eps['period_end'].iloc[-1].strftime('%Y')} 연간 이익 기준"
+    if mcap and len(eq) and eq["value"].iloc[-1] > 0:
+        out["pbr"] = _f(mcap / eq["value"].iloc[-1], 1)
     out["filed"] = rows["filed_date"].max().strftime("%Y-%m-%d")
     return out
 
