@@ -47,6 +47,10 @@ def _rebalance_days(index: pd.DatetimeIndex, rule: str) -> set[pd.Timestamp]:
     if rule == "M":
         s = pd.Series(index, index=index)
         return set(s.groupby([index.year, index.month]).max())
+    if rule == "W":  # 주마다 마지막 거래일(스윙)
+        s = pd.Series(index, index=index)
+        iso = index.isocalendar()
+        return set(s.groupby([iso.year.to_numpy(), iso.week.to_numpy()]).max())
     raise ValueError(f"알 수 없는 리밸런싱 주기: {rule}")
 
 

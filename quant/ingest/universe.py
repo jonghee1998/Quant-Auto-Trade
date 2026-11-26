@@ -8,6 +8,7 @@ FRED_SERIES = ["VIXCLS", "VXVCLS", "T10Y3M", "NFCI", "DEXKOUS", "DGS10", "DGS2",
                "USEPUINDXD",   # 경제정책 불확실성 지수(신문 기사 기반, 일별)
                "WLEMUINDXD",   # 주식시장 변동성 추적지수(신문 기사 기반, 일별)
                "DTWEXBGS", "DCOILWTICO", "T5YIE", "DFII10", "BAMLC0A0CM",
+               "BAA10Y",       # 회사채(BAA) − 10년 국채: 1986년부터(하이일드 스프레드는 FRED에 최근 3년만 남음)
                "ICSA", "STLFSI4", "SAHMREALTIME", "UMCSENT", "INDPRO"]
 KR_NEWS_QUERIES = ["코스피", "코스닥", "환율", "미국 증시"]
 US_NEWS_QUERIES = ["stock market", "Wall Street", "Federal Reserve", "Treasury yields", "earnings"]  # 여러 언론사가 다룬 미국 뉴스(핫한 정도 판단용)

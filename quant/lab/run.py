@@ -28,6 +28,7 @@ def evaluate(
     costs: Costs = Costs(),
     rebalance: str = "M",
     final: bool = False,
+    extra=None,
 ) -> dict:
     if period == "holdout" and registry is not None and registry.has_final(strategy.name):
         raise HoldoutLocked(f"{strategy.name}: 홀드아웃은 이미 평가했다")
@@ -45,6 +46,8 @@ def evaluate(
     var = float(np.var([x / np.sqrt(TRADING_DAYS) for x in prev], ddof=1)) if len(prev) >= 2 else None
     m["n_trials"] = n
     m["dsr"] = deflated_sharpe(res.nav, n, var)
+    if extra is not None:  # 평가 전용 지표(예: 예측 IC) — 백테스트가 끝난 뒤 계산, 전략 결정에는 안 쓰인다
+        m.update(extra())
     if registry is not None:
         row = registry.add(Experiment(strategy.name, hypothesis, params, period, data_version, code_version, m, final))
         m["trial_no"] = row["trial_no"]
