@@ -62,3 +62,13 @@ def test_check_why_keeps_good_items_only_and_merge():
     assert list(w["items"]) == ["KR:TEST01"]
     p = B.merge({"quotes": [], "ai": {"why": {"KR:OLD": {}}}}, {"why-kr-stock": w}, generated_at="t")
     assert set(p["ai"]["why"]) == {"KR:OLD", "KR:TEST01"} and p["ai"]["generatedAt"] == "t" and p["quotes"] == []
+
+
+def test_cluster_korean_titles_despite_particles():
+    rows = [_n("코스피가 6% 급락하며 4700선 마감", "합성일보", "google_news"),
+            _n("코스피는 6% 급락, 4700선으로 마감", "합성경제", "google_news"),
+            _n("[속보] 코스피 6% 급락 4700선 마감", "합성뉴스", "google_news"),
+            _n("원달러 환율 10원 올라 1342원", "합성일보", "google_news")]
+    c = B.cluster_news(rows)
+    assert c[0]["outlets"] == 3 and c[0]["where"] == "한국"
+    assert len(c) == 2

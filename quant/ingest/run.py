@@ -46,6 +46,8 @@ def plan(env: dict, today: date, days: int, kr_have: set[tuple[str, str]] | None
                 jobs.append(("data.go.kr", f"{kind}:{d}", lambda f, kind=kind, d=d: S.kr_daily(f, kind, d, env["DATA_GO_KR_KEY"]), "prices"))
     for q in U.KR_NEWS_QUERIES:  # 키 없는 한국 헤드라인(네이버 키가 없을 때의 기본)
         jobs.append(("google_news", q, lambda f, q=q: S.google_news(f, q), "news"))
+    for q in U.US_NEWS_QUERIES:
+        jobs.append(("google_news", f"en:{q}", lambda f, q=q: S.google_news(f, q, "en"), "news"))
     if env.get("NAVER_CLIENT_ID") and env.get("NAVER_CLIENT_SECRET"):
         for q in U.KR_NEWS_QUERIES:
             jobs.append(("naver", q, lambda f, q=q: S.naver_news(f, q, env["NAVER_CLIENT_ID"], env["NAVER_CLIENT_SECRET"]), "news"))

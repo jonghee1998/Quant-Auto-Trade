@@ -189,11 +189,12 @@ def naver_news(fetch: Fetch, query: str, client_id: str, client_secret: str, dis
 GOOGLE_NEWS_URL = "https://news.google.com/rss/search"
 
 
-def google_news(fetch: Fetch, query: str) -> list[dict]:
+def google_news(fetch: Fetch, query: str, lang: str = "ko") -> list[dict]:
     """한국 시장 헤드라인(키 없음). 구글 뉴스 RSS: 제목·언론사·시각만 있고 본문 요약은 없다.
     공식 API가 아니라 형식이 바뀔 수 있다 → 파싱 실패는 HttpError처럼 이 소스만 실패로 남는다."""
     import xml.etree.ElementTree as ET
-    text = get_text(fetch, GOOGLE_NEWS_URL, {"q": f"{query} when:1d", "hl": "ko", "gl": "KR", "ceid": "KR:ko"},
+    loc = {"ko": ("ko", "KR", "KR:ko"), "en": ("en-US", "US", "US:en")}[lang]
+    text = get_text(fetch, GOOGLE_NEWS_URL, {"q": f"{query} when:1d", "hl": loc[0], "gl": loc[1], "ceid": loc[2]},
                     {"User-Agent": "Mozilla/5.0 (quant-auto-trade)"}, source="google_news")
     rows = []
     for it in ET.fromstring(text).iter("item"):
@@ -204,7 +205,8 @@ def google_news(fetch: Fetch, query: str) -> list[dict]:
         if publisher and title.endswith(f" - {publisher}"):  # 제목 끝의 " - 언론사"는 따로 둔다
             title = title[: -len(publisher) - 3]
         rows.append({"url_hash": url_hash(url), "url": url, "title": _clean(title), "publisher": publisher,
-                     "published_at": parsedate_to_datetime(pub).isoformat(), "tickers": [], "source": "google_news"})
+                     "published_at": parsedate_to_datetime(pub).isoformat(), "tickers": [],
+                     "source": "google_news" if lang == "ko" else "google_news_en"})
     return rows
 
 
