@@ -121,10 +121,14 @@ def kr_daily(fetch: Fetch, kind: str, bas_dt: date, service_key: str, page_size:
 
 
 # ---------------------------------------------------------------- 뉴스: Naver(한국), Finnhub(미국)
+NAVER_NEWS_URL = "https://naverapihub.apigw.ntruss.com/search/v1/news"
+
+
 def naver_news(fetch: Fetch, query: str, client_id: str, client_secret: str, display: int = 100) -> list[dict]:
-    data = get_json(fetch, "https://openapi.naver.com/v1/search/news.json",
+    # 2026-07-31부터 검색 API는 NAVER API HUB(네이버 클라우드)로 이관: 주소·헤더가 바뀌었고 키도 HUB에서 새로 받는다.
+    data = get_json(fetch, NAVER_NEWS_URL,
                     {"query": query, "display": display, "start": 1, "sort": "date"},
-                    {"X-Naver-Client-Id": client_id, "X-Naver-Client-Secret": client_secret}, source="naver")
+                    {"X-NCP-APIGW-API-KEY-ID": client_id.strip(), "X-NCP-APIGW-API-KEY": client_secret.strip()}, source="naver")
     rows = []
     for it in data.get("items", []):
         url = it.get("originallink") or it.get("link")
