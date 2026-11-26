@@ -37,7 +37,8 @@ def plan(env: dict, today: date, days: int, kr_have: set[tuple[str, str]] | None
     if env.get("DATA_GO_KR_KEY"):
         for code in S.KR_INDEXES:  # 지수는 기간 한 번에(날짜당 호출 아님)
             jobs.append(("data.go.kr", f"index:{code}", lambda f, code=code: S.kr_index(f, code, start, today, env["DATA_GO_KR_KEY"]), "prices"))
-        for k in range(1, days + 1):  # 영업일 여부는 응답으로 판단(빈 응답이면 0건)
+        # 전 종목 일별은 하루 4천 행: days를 크게 줘도(지수·미국 백필용) 최근 KR_DAILY_MAX_DAYS까지만 → DB 용량 보호
+        for k in range(1, min(days, KR_DAILY_MAX_DAYS) + 1):  # 영업일 여부는 응답으로 판단(빈 응답이면 0건)
             d = today - timedelta(days=k)
             for kind in ("stock", "etf"):
                 if (kind, str(d)) in kr_have:
@@ -66,6 +67,7 @@ def plan(env: dict, today: date, days: int, kr_have: set[tuple[str, str]] | None
     return jobs
 
 
+KR_DAILY_MAX_DAYS = 260  # 화면은 6개월(약 180일)이면 충분. 한국은 현황용(실험 대상 아님)
 PARALLEL = {"data.go.kr": 4}  # 동시에 받을 개수(그 외 소스는 1개씩: 한도·순서가 중요)
 SAVE = {"fundamentals": store.upsert_fundamentals, "prices": store.upsert_prices, "macro": store.upsert_macro, "news": store.upsert_news}
 

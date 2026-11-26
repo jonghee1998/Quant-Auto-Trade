@@ -305,3 +305,10 @@ def test_kr_index_matches_exact_names_and_reports_unknown():
     g = FakeFetch((200, {"response": {"body": {"totalCount": 1, "items": {"item": [{"basDt": "20240102", "idxNm": "합성지수", "clpr": "1"}]}}}}))
     with pytest.raises(ValueError, match="합성지수"):
         S.kr_index(g, "VKOSPI", date(2024, 1, 2), date(2024, 1, 2), "FAKE")
+
+
+def test_kr_daily_jobs_capped_even_with_huge_days():
+    from quant.ingest.run import KR_DAILY_MAX_DAYS, plan
+    jobs = [d for s, d, _, _ in plan({"DATA_GO_KR_KEY": "FAKE"}, date(2024, 1, 5), 7700) if s == "data.go.kr"]
+    daily = [d for d in jobs if not d.startswith("index:")]
+    assert len(daily) == 2 * KR_DAILY_MAX_DAYS and any(d.startswith("index:") for d in jobs)
