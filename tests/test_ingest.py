@@ -236,3 +236,23 @@ def test_kr_jobs_fetch_in_parallel_and_report_in_order():
     assert s["ok"] == 4 and peak[0] == 4
     lines = [o.split(":")[0] + ":" + o.split(":")[1] for o in out if o.startswith("data.go.kr")]
     assert [x.split()[1] for x in lines] == ["stock:2024-01-04", "etf:2024-01-04", "stock:2024-01-03", "etf:2024-01-03"]
+
+
+def test_upsert_prices_uses_few_round_trips():
+    # 종목마다 왕복하면 한국 전 종목 저장에 2분+ 걸렸다: 종목 수와 상관없이 왕복 횟수가 고정이어야 한다
+    from quant.ingest import store
+    calls = []
+
+    class Cur:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def executemany(self, sql, params): calls.append(("many", len(list(params))))
+        def execute(self, sql, params=None): calls.append(("one", sql.split()[0]))
+        def fetchall(self): return [("KR", f"TEST{i:04d}", i) for i in range(3000)]
+
+    class Conn:
+        def cursor(self): return Cur()
+    rows = [{"market": "KR", "code": f"TEST{i:04d}", "name": "가짜종목", "kind": "stock", "date": "2024-01-02",
+             "close": 1.0, "source": "test"} for i in range(3000)]
+    assert store.upsert_prices(Conn(), rows + rows[:5]) == 3005
+    assert [c[0] for c in calls] == ["many", "one", "many"] and calls[0][1] == 3000
