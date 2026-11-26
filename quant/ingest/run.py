@@ -69,7 +69,7 @@ def plan(env: dict, today: date, days: int, kr_have: set[tuple[str, str]] | None
     return jobs
 
 
-KR_DAILY_MAX_DAYS = 260  # 화면은 6개월(약 180일)이면 충분. 한국은 현황용(실험 대상 아님)
+KR_DAILY_MAX_DAYS = 400  # 52주 통계(1년)까지. 한국은 현황용(실험 대상 아님) — 하루 약 4천 행, 저장 공간은 데이터 상태 화면에서 확인
 PARALLEL = {"data.go.kr": 4}  # 동시에 받을 개수(그 외 소스는 1개씩: 한도·순서가 중요)
 SAVE = {"fundamentals": store.upsert_fundamentals, "prices": store.upsert_prices, "macro": store.upsert_macro, "news": store.upsert_news}
 

@@ -1,7 +1,10 @@
 import Link from 'next/link';
 import { Back, Connecting, Planned } from '../../../components/ui';
 import { getMarket } from '../../../lib/source';
-import { pct, pp, tone } from '../../../lib/format';
+import { getDetail } from '../../../lib/detail';
+import Spark from '../../../components/Spark';
+import Star from '../../../components/Star';
+import { num, pct, pp, tone } from '../../../lib/format';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,14 +14,20 @@ export default async function Stock({ params, searchParams }: { params: Promise<
   const d = await getMarket();
   const item = d.universe.find((i) => i.code === code && (!m || i.market === m)) ?? d.universe.find((i) => i.code === code);
   const why = item ? d.ai.why?.[`${item.market}:${item.code}`] : undefined;
+  const det = item ? await getDetail(`${item.market}:${item.code}`) : null;
+  const st = det?.stats;
+  const f = det?.fund;
   const r = item?.r ?? [null, null, null];
   const b = d.bench[item?.market ?? 'US'];
   return (
     <main className="page">
       <Back href="/trend" label="트렌드" />
       <div style={{ padding: '0 16px' }}>
-        <div className="sub">{code} · {item ? `${item.market === 'KR' ? '한국' : '미국'} · ${item.kind}` : '정보 없음'}</div>
-        <h1 style={{ margin: '2px 0 0', fontSize: 22 }}>{item?.name ?? code}</h1>
+        <div className="sub">{code} · {item ? `${item.market === 'KR' ? '한국' : item.market === 'W' ? '나라별' : '미국'} · ${item.kind}` : '정보 없음'}</div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h1 style={{ margin: '2px 0 0', fontSize: 22 }}>{item?.name ?? code}</h1>
+          {item && <Star id={`${item.market}:${item.code}`} />}
+        </div>
       </div>
       {d.sample || !item ? <Connecting reason={d.sample ? d.sampleReason : '이 종목은 아직 수집 대상이 아니에요'} /> : <section className="card">
         <h2>기간 수익률</h2>
@@ -47,10 +56,63 @@ export default async function Stock({ params, searchParams }: { params: Promise<
             <div className="sub" style={{ marginTop: 6 }}>해석은 AI가 쓴 거라 틀릴 수 있어요.</div>
           </section>
         </>
-      ) : item && <Planned title="왜 올랐나·내렸나" note="트렌드 TOP 15에 오른 종목은 AI가 매일 공시·뉴스·업종 흐름으로 이유를 써요." />}
-      <Planned title="위험·통계" note="변동성 · 최대 낙폭 · 베타 · 52주 위치 · 장기 추세(200일선 위/아래)." />
-      <Planned title="재무" note="매출·이익 성장, PER·PBR, 분기 매출 추이 — 공시일 기준(미국 SEC, 한국 OpenDART)." />
+      ) : item && <div className="sub" style={{ margin: '12px 16px 0' }}>‘왜 올랐나·내렸나’ 해석은 트렌드 TOP 15에 오른 종목만 AI가 매일 써요.</div>}
+      {item && (st && st.days >= 20 ? (
+        <section className="card">
+          <h2>1년 흐름과 위험</h2>
+          {det && <Spark points={det.chart} />}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: '10px 12px', marginTop: 12, fontSize: 13 }}>
+            <Stat label="52주 위치" value={st.pos == null ? '—' : `${st.pos}%`} hint={`최저 ${num(st.low, 2)} ~ 최고 ${num(st.high, 2)} 중 어디쯤(100%=최고)`} />
+            <Stat label="장기 추세" value={st.ma200 == null ? '—' : st.ma200 >= 0 ? '200일선 위' : '200일선 아래'} hint={st.ma200 == null ? '데이터 200일 미만' : `200일 평균보다 ${pct(st.ma200)}`} />
+            <Stat label="최대 낙폭(1년)" value={st.mdd == null ? '—' : `${st.mdd}%`} hint="1년 중 고점에서 가장 많이 빠진 정도" />
+            <Stat label="변동성(1년)" value={st.vol == null ? '—' : `연 ${st.vol}%`} hint="클수록 오르내림이 심함 · S&P 500은 보통 15~20%" />
+            <Stat label="베타" value={st.beta == null ? '—' : String(st.beta)} hint={`${item.market === 'KR' ? '코스피' : 'S&P 500'}가 1% 움직일 때 평균 몇 % 움직였나`} />
+            <Stat label="데이터" value={`${st.days}거래일`} hint={`${det?.date ?? ''} 기준`} />
+          </div>
+        </section>
+      ) : <Connecting reason="1년 흐름·위험은 다음 수집 뒤 채워져요" />)}
+      {item && item.market === 'US' && item.kind === '주식' ? (f && f.quarters.length ? (
+        <section className="card">
+          <h2>재무 <span className="sub" style={{ fontWeight: 400 }}>미국 SEC 공시 · {f.filed} 접수분까지</span></h2>
+          <div style={{ display: 'flex', gap: 16, marginTop: 8, fontSize: 13 }}>
+            <span>PER <b>{f.per ?? '—'}</b>{f.epsYear ? <span className="sub"> ({f.epsYear} 연간 이익 기준)</span> : null}</span>
+            <span>PBR <b>{f.pbr ?? '—'}</b></span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 0.8fr', rowGap: 6, fontSize: 13, textAlign: 'right', marginTop: 10 }}>
+            <span className="sub" style={{ textAlign: 'left' }}>분기 끝</span><span className="sub">매출</span><span className="sub">순이익</span><span className="sub">매출 1년 전 대비</span>
+            {f.quarters.slice().reverse().map((q) => (
+              <Quarter key={q.end} q={q} />
+            ))}
+          </div>
+          <div className="sub" style={{ marginTop: 8, lineHeight: 1.5 }}>단위 억 달러. PER = 주가 ÷ 1년 이익(낮을수록 이익 대비 싸다), PBR = 주가 ÷ 장부상 순자산.</div>
+        </section>
+      ) : <Connecting reason="재무는 다음 수집 뒤 채워져요" />) : item && (
+        item.market === 'KR' && item.kind === '주식' ? <Planned title="재무" note="한국 종목 재무(매출·이익, PER·PBR)는 OpenDART 연결 뒤 붙여요." /> : null
+      )}
       <div style={{ margin: '12px 16px 0' }}><Link href="/terms" className="sub">용어 풀이 보기 ›</Link></div>
     </main>
+  );
+}
+
+function Stat({ label, value, hint }: { label: string; value: string; hint: string }) {
+  return (
+    <div>
+      <div className="sub">{label}</div>
+      <div className="b" style={{ fontSize: 16, marginTop: 2 }}>{value}</div>
+      <div className="sub" style={{ lineHeight: 1.4, marginTop: 2 }}>{hint}</div>
+    </div>
+  );
+}
+
+const eok = (v: number | null) => (v == null ? '—' : (v / 1e8).toLocaleString('ko-KR', { maximumFractionDigits: 0 }));
+
+function Quarter({ q }: { q: { end: string; revenue: number | null; netIncome: number | null; revYoY: number | null } }) {
+  return (
+    <>
+      <span style={{ textAlign: 'left' }}>{q.end.slice(2, 7).replace('-', '.')}</span>
+      <span>{eok(q.revenue)}</span>
+      <span className={tone(q.netIncome)}>{eok(q.netIncome)}</span>
+      <span className={tone(q.revYoY)}>{pct(q.revYoY)}</span>
+    </>
   );
 }

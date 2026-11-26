@@ -307,6 +307,14 @@ def main() -> int:
             k = f"{u['market']}/{u['kind']}"
             cover[k] = cover.get(k, 0) + (u["r"][2] is not None)
         print("화면 목록(6개월 수익률 있는 개수): " + ", ".join(f"{k} {v}" for k, v in sorted(cover.items())))
+        try:  # 상세 화면 값(실패해도 홈 요약은 이미 저장됨)
+            from . import detail as DT
+            kr_codes = [u["code"] for u in payload["universe"] if u["market"] == "KR"] + list(KR_INDEX_CODES) + [KR_BENCH]
+            us_d, kr_d, macro_long, fund = DT.load_inputs(conn, kr_codes)
+            print(f"상세: {DT.save(conn, DT.build(payload, us_d, kr_d, macro_long, fund), day)}개")
+        except Exception as e:  # noqa: BLE001
+            conn.rollback()
+            print(f"상세 실패: {type(e).__name__}: {e}")
     return 0
 
 
