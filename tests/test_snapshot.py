@@ -41,7 +41,7 @@ def test_pick_kr_by_traded_value_and_excludes_leveraged():
     idx = pd.bdate_range("2024-01-02", periods=30)
     rows = []
     spec = [("TEST01", "가짜종목A", "stock", 1000, 10), ("TEST02", "가짜종목B", "stock", 10, 10),
-            ("TEST03", "가짜ETF 레버리지", "etf", 1000, 100), ("TEST04", "가짜ETF", "etf", 500, 10), ("069500", "기준ETF", "etf", 100, 1)]
+            ("TEST03", "가짜ETF 레버리지", "etf", 1000, 100), ("TEST04", "가짜ETF", "etf", 500, 10), ("069500", "기준ETF", "etf", 100, 1), ("KOSPI", "코스피", "index", 2500, 0)]
     for code, name, kind, close, vol in spec:
         rows += [{"code": code, "name": name, "kind": kind, "date": d, "close": close * (1 + i / 100), "volume": vol} for i, d in enumerate(idx)]
     px, stocks, etfs = SN.pick_kr(pd.DataFrame(rows), n_stock=1, n_etf=5)
@@ -51,6 +51,8 @@ def test_pick_kr_by_traded_value_and_excludes_leveraged():
     kinds = {(u["market"], u["kind"]) for u in p["universe"]}
     assert ("KR", "주식") in kinds and ("KR", "업종") in kinds
     assert p["bench"]["KR"][0] is not None
+    q = {x["id"]: x for x in p["quotes"]}
+    assert q["korea"]["name"] == "한국 코스피" and q["korea"]["m1"] > 0  # EWY(달러)가 아니라 실제 지수
 
 
 def test_pick_news_balances_and_dedupes():

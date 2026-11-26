@@ -19,10 +19,13 @@ from .ingest import universe as U
 QUOTE_DEFS = [  # (id, 이름, 종류, 원천)
     ("spx", "미국 S&P 500 (SPY)", "etf", "SPY"),
     ("ndx", "미국 나스닥 100 (QQQ)", "etf", "QQQ"),
-    ("korea", "한국 (EWY)", "etf", "EWY"),
+    ("korea", "한국 코스피", "kr", "KOSPI"),
+    ("kosdaq", "한국 코스닥", "kr", "KOSDAQ"),
     ("usdkrw", "원/달러 환율", "macro", "DEXKOUS"),
-    ("vix", "불안 지수 VIX", "macro", "VIXCLS"),
+    ("vix", "미국 불안 지수 VIX", "macro", "VIXCLS"),
+    ("vkospi", "한국 불안 지수 VKOSPI", "kr", "VKOSPI"),
 ]
+KR_INDEX_CODES = ("KOSPI", "KOSDAQ", "KOSPI200", "VKOSPI")
 
 
 def _f(x) -> float | None:
@@ -43,13 +46,15 @@ def quote(qid: str, name: str, s: pd.Series) -> dict:
     z = MK.move_z(s) if len(s) else {"change": None, "std": None}
     q = {"id": qid, "name": name, "value": _f(s.iloc[-1]) if len(s) else None, "change": _f(z["change"]),
          "dailyStd": _f(z["std"]), "m1": _ret(s, 21), "y1": _ret(s, 252)}
-    if qid in ("vix", "usdkrw") and len(s) > 1:
+    if qid in ("vix", "vkospi", "usdkrw") and len(s) > 1:
         diff = s.iloc[-1] - s.iloc[-2]
         q["changeText"] = f"{'+' if diff >= 0 else '−'}{abs(diff):.1f}{'원' if qid == 'usdkrw' else ''}"
     if qid == "usdkrw":
         q["unit"] = "원"
     if qid == "vix":
         q["note"] = "보통 15~20 · 30 넘으면 공포"
+    if qid == "vkospi":
+        q["note"] = "VIX의 한국판(코스피200 옵션 기준)"
     return q
 
 
@@ -102,7 +107,7 @@ def pick_kr(rows: pd.DataFrame, n_stock: int = 300, n_etf: int = 100) -> tuple[p
                  and not (kind == "etf" and any(w in str(meta.at[c, "name"]) for w in KR_EXCLUDE))][:n]
         return {c: meta.at[c, "name"] or c for c in codes}
     stocks, etfs = top("stock", n_stock), top("etf", n_etf)
-    keep = set(stocks) | set(etfs) | {KR_BENCH}
+    keep = set(stocks) | set(etfs) | {KR_BENCH, *KR_INDEX_CODES}
     px = rows[rows["code"].isin(keep)].pivot(index="date", columns="code", values="close").sort_index()
     return px, stocks, etfs
 
@@ -155,7 +160,14 @@ def build_payload(us_px: pd.DataFrame, macro: dict[str, pd.Series], news: list[d
                   kr_names: dict | None = None, as_of: str | None = None, kr_etf_names: dict | None = None) -> dict:
     quotes = []
     for qid, name, kind, src in QUOTE_DEFS:
-        s = us_px[src] if kind == "etf" and src in us_px else macro.get(src, pd.Series(dtype=float))
+        if kind == "kr":
+            s = kr_px[src] if kr_px is not None and src in kr_px else pd.Series(dtype=float)
+            if qid == "korea" and s.dropna().empty and "EWY" in us_px:  # 지수가 아직 없으면 EWY(달러 기준)로 대신
+                qid_name = "한국 (EWY · 달러 기준)"
+                quotes.append(quote(qid, qid_name, us_px["EWY"]))
+                continue
+        else:
+            s = us_px[src] if kind == "etf" and src in us_px else macro.get(src, pd.Series(dtype=float))
         quotes.append(quote(qid, name, s))
     sectors = [c for c in U.SECTORS if c.startswith("XL") and c in us_px]
     spy = us_px["SPY"] if "SPY" in us_px else pd.Series(dtype=float)
@@ -166,8 +178,9 @@ def build_payload(us_px: pd.DataFrame, macro: dict[str, pd.Series], news: list[d
     bench_kr = [None, None, None]
     if kr_px is not None and not kr_px.empty:
         universe += universe_rows(kr_px, kr_etf_names or {}, "업종", "KR") + universe_rows(kr_px, kr_names or {}, "주식", "KR")
-        if KR_BENCH in kr_px:
-            bench_kr = [_ret(kr_px[KR_BENCH], d) for d in (21, 63, 126)]
+        base = "KOSPI" if "KOSPI" in kr_px and kr_px["KOSPI"].notna().sum() > 126 else KR_BENCH
+        if base in kr_px:
+            bench_kr = [_ret(kr_px[base], d) for d in (21, 63, 126)]
     return {
         "asOf": as_of, "summary": summary_line(quotes), "quotes": quotes,
         "trendLight": {"state": light["state"], "gapPct": _f(light["gap_pct"])},
