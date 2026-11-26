@@ -3,7 +3,12 @@
 US_ETFS = ["SOXX", "EWJ", "MCHI", "EWT", "VGK", "INDA", "EWY", "EWZ", "SPY", "VOO", "IVV", "QQQ", "IWM", "DIA", "TLT", "IEF", "SHY", "GLD", "VNQ", "EFA", "EEM",
            "XLK", "XLF", "XLE", "XLV", "XLY", "XLP", "XLI", "XLU", "XLB", "XLRE", "XLC"]
 US_NEWS_TICKERS = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA"]
-FRED_SERIES = ["VIXCLS", "VXVCLS", "T10Y3M", "NFCI", "DEXKOUS", "DGS10", "DGS2", "T10Y2Y", "DFF", "BAMLH0A0HYM2", "CPIAUCSL", "UNRATE"]
+FRED_SERIES = ["VIXCLS", "VXVCLS", "T10Y3M", "NFCI", "DEXKOUS", "DGS10", "DGS2", "T10Y2Y", "DFF", "BAMLH0A0HYM2", "CPIAUCSL", "UNRATE",
+               # 실험실 외생변수(예측용): 뉴스 기반 지수(20년치), 달러·유가·물가기대·신용·고용·경기
+               "USEPUINDXD",   # 경제정책 불확실성 지수(신문 기사 기반, 일별)
+               "WLEMUINDXD",   # 주식시장 변동성 추적지수(신문 기사 기반, 일별)
+               "DTWEXBGS", "DCOILWTICO", "T5YIE", "DFII10", "BAMLC0A0CM",
+               "ICSA", "STLFSI4", "SAHMREALTIME", "UMCSENT", "INDPRO"]
 KR_NEWS_QUERIES = ["코스피", "코스닥", "환율", "미국 증시"]
 US_NEWS_QUERIES = ["stock market", "Wall Street", "Federal Reserve", "Treasury yields", "earnings"]  # 여러 언론사가 다룬 미국 뉴스(핫한 정도 판단용)
 US_STOCK_NAMES = {"AAPL": "애플", "MSFT": "마이크로소프트", "NVDA": "엔비디아", "AMZN": "아마존", "GOOGL": "알파벳",
