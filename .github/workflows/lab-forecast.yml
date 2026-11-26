@@ -1,0 +1,41 @@
+name: lab-forecast
+# 실험실 1차: 예측 기반 30개(quant/forecast/experiments.py)를 DB 데이터로 돌리고 experiments 표에 기록한다.
+# AI가 아니라 코드만 실행한다. 홀드아웃(2023~)은 여기서 돌리지 않는다.
+run-name: "lab-forecast ${{ inputs.period }} ${{ inputs.ids }}"
+on:
+  workflow_dispatch:
+    inputs:
+      period: { description: 'dev 또는 valid', default: 'dev' }
+      ids: { description: '실험 고르기(쉼표, 빈칸=30개 전부)', default: '' }
+permissions:
+  contents: read
+concurrency:
+  group: lab-run
+  cancel-in-progress: false
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -q -r requirements.txt
+      - name: Run
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          PERIOD: ${{ inputs.period }}
+          IDS: ${{ inputs.ids }}
+        run: |
+          set -o pipefail
+          python -m quant.forecast.run --period "$PERIOD" --ids "$IDS" --out lab-out | tee "$RUNNER_TEMP/log.txt"
+          cat "lab-out/forecast-$PERIOD.md" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lab-forecast-${{ inputs.period }}
+          path: lab-out/
+          retention-days: 30

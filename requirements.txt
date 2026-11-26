@@ -6,3 +6,4 @@ pyarrow>=17,<22
 duckdb>=1.1,<2
 pytest>=8,<9
 psycopg[binary]>=3.2,<4
+scikit-learn>=1.5,<2   # 실험실 예측 모델(릿지·부스팅·신경망·숲)
