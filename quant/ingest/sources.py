@@ -87,6 +87,51 @@ KR_ENDPOINTS = {
 }
 
 
+# 지수(금융위원회_지수시세정보 V2). 이름은 포털 표기와 정확히 같아야 해서 후보를 여럿 둔다.
+KR_INDEX_URL = f"{DATA_GO_KR}/GetMarketIndexInfoService_V2"
+KR_INDEXES = {  # code: (오퍼레이션, 검색어, 허용 이름들)
+    "KOSPI": ("getStockMarketIndex_V2", "코스피", ("코스피",)),
+    "KOSDAQ": ("getStockMarketIndex_V2", "코스닥", ("코스닥",)),
+    "KOSPI200": ("getStockMarketIndex_V2", "코스피", ("코스피 200", "코스피200")),
+    "VKOSPI": ("getDerivationProductMarketIndex_V2", "변동성", ("코스피 200 변동성지수", "코스피200 변동성지수", "VKOSPI")),
+}
+
+
+def kr_index(fetch: Fetch, code: str, start: date, end: date, service_key: str, page_size: int = 1000) -> list[dict]:
+    """한 지수의 기간 일별 종가. 이름이 안 맞으면 응답에 있던 이름을 오류에 담아 고칠 수 있게 한다."""
+    op, like, names = KR_INDEXES[code]
+    service_key = kr_service_key(service_key)
+    seen: set[str] = set()
+    rows, page = [], 1
+    while True:
+        data = get_json(fetch, f"{KR_INDEX_URL}/{op}",
+                        {"serviceKey": service_key, "resultType": "json", "numOfRows": page_size, "pageNo": page,
+                         "likeIdxNm": like, "beginBasDt": start.strftime("%Y%m%d"),
+                         "endBasDt": (end + timedelta(days=1)).strftime("%Y%m%d")},  # endBasDt는 끝 날짜 미포함
+                        source=f"data.go.kr/index")
+        body = (data.get("response") or {}).get("body") or {}
+        items = (body.get("items") or {}).get("item") or []
+        if isinstance(items, dict):
+            items = [items]
+        for it in items:
+            nm = str(it.get("idxNm", "")).strip()
+            seen.add(nm)
+            close = _num(it.get("clpr"))
+            if nm not in names or close is None or close <= 0:
+                continue
+            d = it["basDt"]
+            rows.append({"market": "KR", "code": code, "name": nm, "kind": "index", "date": f"{d[:4]}-{d[4:6]}-{d[6:]}",
+                         "open": _num(it.get("mkp")), "high": _num(it.get("hipr")), "low": _num(it.get("lopr")),
+                         "close": close, "adj_factor": 1.0, "volume": None, "source": "data.go.kr"})
+        total = int(body.get("totalCount") or 0)
+        if page * page_size >= total or not items:
+            break
+        page += 1
+    if not rows and seen:
+        raise ValueError(f"지수 이름 불일치({code}): 응답 이름 예 {sorted(seen)[:12]}")
+    return rows
+
+
 def kr_service_key(key: str) -> str:
     """포털의 '인코딩 키'(%2B 등)를 넣어도 두 번 인코딩되지 않게 원래 키로 되돌린다."""
     from urllib.parse import unquote

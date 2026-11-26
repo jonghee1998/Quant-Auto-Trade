@@ -35,6 +35,8 @@ def plan(env: dict, today: date, days: int, kr_have: set[tuple[str, str]] | None
         for s in U.FRED_SERIES:
             jobs.append(("fred", s, lambda f, s=s: S.fred_series(f, s, start, env["FRED_API_KEY"]), "macro"))
     if env.get("DATA_GO_KR_KEY"):
+        for code in S.KR_INDEXES:  # 지수는 기간 한 번에(날짜당 호출 아님)
+            jobs.append(("data.go.kr", f"index:{code}", lambda f, code=code: S.kr_index(f, code, start, today, env["DATA_GO_KR_KEY"]), "prices"))
         for k in range(1, days + 1):  # 영업일 여부는 응답으로 판단(빈 응답이면 0건)
             d = today - timedelta(days=k)
             for kind in ("stock", "etf"):

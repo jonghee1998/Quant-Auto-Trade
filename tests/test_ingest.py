@@ -204,9 +204,10 @@ def test_plan_skips_kr_dates_already_stored():
     # 시간 예산으로 끊겨도 다음 실행이 이어서 받도록: 이미 받은 날짜는 계획에서 뺀다
     from quant.ingest.run import plan
     env = {"DATA_GO_KR_KEY": "FAKE"}
-    full = [d for s, d, _, _ in plan(env, date(2024, 1, 5), 2) if s == "data.go.kr"]
+    full = [d for s, d, _, _ in plan(env, date(2024, 1, 5), 2) if s == "data.go.kr" and not d.startswith("index:")]
     assert full == ["stock:2024-01-04", "etf:2024-01-04", "stock:2024-01-03", "etf:2024-01-03"]
-    part = [d for s, d, _, _ in plan(env, date(2024, 1, 5), 2, {("stock", "2024-01-04"), ("etf", "2024-01-03")}) if s == "data.go.kr"]
+    part = [d for s, d, _, _ in plan(env, date(2024, 1, 5), 2, {("stock", "2024-01-04"), ("etf", "2024-01-03")})
+            if s == "data.go.kr" and not d.startswith("index:")]
     assert part == ["etf:2024-01-04", "stock:2024-01-03"]
 
 
@@ -227,14 +228,16 @@ def test_kr_jobs_fetch_in_parallel_and_report_in_order():
             pass
         with lock:
             live[0] -= 1
+        if "GetMarketIndexInfoService" in url:
+            return Response(200, json.dumps({"response": {"body": {"totalCount": 0, "items": ""}}}))
         d = params["basDt"]
         body = {"response": {"body": {"totalCount": 1, "items": {"item": [
             {"basDt": d, "srtnCd": "TEST01", "itmsNm": "가짜종목A", "clpr": "100"}]}}}}
         return Response(200, json.dumps(body))
     out = []
     s = run({"DATA_GO_KR_KEY": "FAKE"}, fetch, None, today=date(2024, 1, 5), days=2, out=out.append)
-    assert s["ok"] == 4 and peak[0] == 4
-    lines = [o.split(":")[0] + ":" + o.split(":")[1] for o in out if o.startswith("data.go.kr")]
+    assert s["ok"] == 8 and peak[0] == 4
+    lines = [o.split(":")[0] + ":" + o.split(":")[1] for o in out if o.startswith("data.go.kr") and "index:" not in o]
     assert [x.split()[1] for x in lines] == ["stock:2024-01-04", "etf:2024-01-04", "stock:2024-01-03", "etf:2024-01-03"]
 
 
@@ -284,3 +287,21 @@ def test_finnhub_market_news_is_marked_market():
     [r] = S.finnhub_market_news(f, "FAKE")
     assert r["source"] == "finnhub_market" and r["tickers"] == [] and r["title"] == "합성 시장 뉴스"
     assert f.calls[0][0].endswith("/api/v1/news") and f.calls[0][1] == {"category": "general"}
+
+
+def test_kr_index_matches_exact_names_and_reports_unknown():
+    body = {"response": {"body": {"totalCount": 3, "items": {"item": [
+        {"basDt": "20240102", "idxNm": "코스피", "clpr": "2600.5"},
+        {"basDt": "20240102", "idxNm": "코스피 200", "clpr": "350.1"},
+        {"basDt": "20240102", "idxNm": "코스피 대형주", "clpr": "1.0"}]}}}}
+    f = FakeFetch((200, body), (200, body))
+    [k] = S.kr_index(f, "KOSPI", date(2024, 1, 2), date(2024, 1, 2), "FAKE")
+    assert (k["code"], k["close"], k["kind"], k["date"]) == ("KOSPI", 2600.5, "index", "2024-01-02")
+    assert f.calls[0][0].endswith("/GetMarketIndexInfoService_V2/getStockMarketIndex_V2")
+    assert f.calls[0][1]["endBasDt"] == "20240103"  # 끝 날짜 미포함이라 하루 더
+    [k2] = S.kr_index(f, "KOSPI200", date(2024, 1, 2), date(2024, 1, 2), "FAKE")
+    assert k2["close"] == 350.1
+    import pytest
+    g = FakeFetch((200, {"response": {"body": {"totalCount": 1, "items": {"item": [{"basDt": "20240102", "idxNm": "합성지수", "clpr": "1"}]}}}}))
+    with pytest.raises(ValueError, match="합성지수"):
+        S.kr_index(g, "VKOSPI", date(2024, 1, 2), date(2024, 1, 2), "FAKE")
