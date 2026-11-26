@@ -16,7 +16,14 @@ KR_SOURCES = {"naver", "google_news"}
 _TOK = re.compile(r"[\w&]+", re.UNICODE)
 
 
+_HANGUL = re.compile(r"[가-힣]")
+
+
 def _tokens(title: str) -> set[str]:
+    """영어는 단어, 한국어는 글자 2개씩(조사 '코스피가/코스피는' 차이에 흔들리지 않게)."""
+    if _HANGUL.search(title):
+        s = re.sub(r"[^\w]", "", title.lower())
+        return {s[i:i + 2] for i in range(len(s) - 1)}
     return {t for t in _TOK.findall(title.lower()) if len(t) >= 2}
 
 
@@ -24,7 +31,7 @@ def _id(s: str) -> str:
     return hashlib.sha1(s.encode()).hexdigest()[:10]
 
 
-def cluster_news(rows: list[dict], jaccard: float = 0.4) -> list[dict]:
+def cluster_news(rows: list[dict], jaccard: float = 0.35) -> list[dict]:
     """같은 사건을 다룬 기사를 묶고 '핫한 순'(보도 언론사 수 → 최신)으로 정렬.
     rows: title, url, publisher, source, published_at(ISO 또는 datetime)."""
     rows = sorted((r for r in rows if r.get("title") and _home_ok(r)),
@@ -35,14 +42,14 @@ def cluster_news(rows: list[dict], jaccard: float = 0.4) -> list[dict]:
         if not tok:
             continue
         where = "한국" if r.get("source") in KR_SOURCES else "미국"
-        best = None
+        best, best_j = None, jaccard
         for c in clusters:
             if c["where"] != where:
                 continue
             inter = len(tok & c["_tok"])
-            if inter and inter / len(tok | c["_tok"]) >= jaccard:
-                best = c
-                break
+            j = inter / len(tok | c["_tok"]) if inter else 0.0
+            if j >= best_j:
+                best, best_j = c, j
         if best is None:
             best = {"id": _id(r["url"]), "where": where, "_tok": tok, "titles": [], "articles": [], "publishers": set(),
                     "latest": str(r["published_at"])}

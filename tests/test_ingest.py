@@ -279,7 +279,8 @@ def test_google_news_parses_rss_without_key():
 
 def test_plan_has_kr_news_without_naver_key():
     from quant.ingest.run import plan
-    assert {s for s, *_ in plan({}, date(2024, 1, 5), 1)} == {"google_news"}
+    jobs = [d for s, d, *_ in plan({}, date(2024, 1, 5), 1)]
+    assert "코스피" in jobs and "en:stock market" in jobs
 
 
 def test_finnhub_market_news_is_marked_market():
@@ -312,3 +313,9 @@ def test_kr_daily_jobs_capped_even_with_huge_days():
     jobs = [d for s, d, _, _ in plan({"DATA_GO_KR_KEY": "FAKE"}, date(2024, 1, 5), 7700) if s == "data.go.kr"]
     daily = [d for d in jobs if not d.startswith("index:")]
     assert len(daily) == 2 * KR_DAILY_MAX_DAYS and any(d.startswith("index:") for d in jobs)
+
+
+def test_google_news_english_is_us_source():
+    f = FakeFetch((200, GOOGLE_RSS))
+    [r] = S.google_news(f, "stock market", "en")
+    assert r["source"] == "google_news_en" and f.calls[0][1]["ceid"] == "US:en"
