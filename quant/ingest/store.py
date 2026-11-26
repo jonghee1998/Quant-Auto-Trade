@@ -109,7 +109,7 @@ def kr_top_stocks(conn, n: int = 300) -> list[str]:
     """최근 20거래일 거래대금 상위 한국 주식 코드(화면 목록과 같은 기준)."""
     with conn.cursor() as cur:
         cur.execute("""with d as (select distinct p.date from prices_daily p join instruments i on i.id = p.instrument_id
-                                  where i.market = 'KR' order by p.date desc limit 20)
+                                  where i.market = 'KR' and p.date >= current_date - 45 order by p.date desc limit 20)
                        select i.code from prices_daily p join instruments i on i.id = p.instrument_id
                        where i.market = 'KR' and i.kind = 'stock' and p.date in (select date from d)
                        group by i.code order by avg(p.close * coalesce(p.volume, 0)) desc limit %s""", (n,))
