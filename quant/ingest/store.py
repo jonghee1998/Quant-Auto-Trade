@@ -10,21 +10,23 @@ def _now() -> datetime:
 
 
 def upsert_instruments(conn, rows: Iterable[dict]) -> dict[tuple[str, str], int]:
-    """(market, code) → id. 이름·종류는 새 값이 있을 때만 갱신."""
-    ids: dict[tuple[str, str], int] = {}
+    """(market, code) → id. 이름·종류는 새 값이 있을 때만 갱신.
+    종목마다 한 번씩 왕복하면 한국 전 종목(약 4천)에 2분 넘게 걸려서, 넣기 1번·읽기 1번으로 끝낸다."""
+    uniq: dict[tuple[str, str], dict] = {}
+    for r in rows:
+        uniq.setdefault((r["market"], r["code"]), r)
+    if not uniq:
+        return {}
     with conn.cursor() as cur:
-        for r in rows:
-            key = (r["market"], r["code"])
-            if key in ids:
-                continue
-            cur.execute(
-                """insert into instruments (market, code, name, kind) values (%s, %s, %s, %s)
-                   on conflict (market, code) do update
-                   set name = coalesce(excluded.name, instruments.name)
-                   returning id""",
-                (r["market"], r["code"], r.get("name"), r.get("kind") or "etf"))
-            ids[key] = cur.fetchone()[0]
-    return ids
+        cur.executemany(
+            """insert into instruments (market, code, name, kind) values (%s, %s, %s, %s)
+               on conflict (market, code) do update set name = coalesce(excluded.name, instruments.name)""",
+            [(m, c, r.get("name"), r.get("kind") or "etf") for (m, c), r in uniq.items()])
+        cur.execute(
+            """select i.market, i.code, i.id from instruments i
+               join unnest(%s::text[], %s::text[]) as k(market, code) on i.market = k.market and i.code = k.code""",
+            ([m for m, _ in uniq], [c for _, c in uniq]))
+        return {(m, c): i for m, c, i in cur.fetchall()}
 
 
 def upsert_prices(conn, rows: list[dict]) -> int:

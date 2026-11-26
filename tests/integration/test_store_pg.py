@@ -80,3 +80,15 @@ def test_snapshot_roundtrip(conn):
     with conn.cursor() as cur:
         cur.execute("select payload->'trendLight'->>'state' from daily_brief where date = %s", (today,))
         assert cur.fetchone() == ("green",)
+
+
+def test_upsert_instruments_bulk_keeps_names(conn):
+    from quant.ingest import store
+    rows = [{"market": "KR", "code": f"TEST{i:04d}", "name": f"가짜종목{i}", "kind": "stock"} for i in range(300)]
+    ids = store.upsert_instruments(conn, rows)
+    assert len(ids) == 300 and len(set(ids.values())) == 300
+    again = store.upsert_instruments(conn, [dict(r, name=None) for r in rows[:10]] + [rows[0]])
+    assert again == {k: ids[k] for k in again} and len(again) == 10
+    with conn.cursor() as cur:
+        cur.execute("select name from instruments where market = 'KR' and code = 'TEST0003'")
+        assert cur.fetchone()[0] == "가짜종목3"
