@@ -85,3 +85,12 @@ def finish_run(conn, run_id: int, status: str, rows: int, error: str | None = No
     with conn.cursor() as cur:
         cur.execute("update ingest_runs set finished_at = %s, status = %s, rows = %s, error = %s where id = %s",
                     (_now(), status, rows, (error or None) and error[:500], run_id))
+
+
+def kr_done(conn, since) -> set[tuple[str, str]]:
+    """data.go.kr에서 이미 받은 (kind, 날짜). 하루치가 충분히(100종목 이상) 들어온 날만 완료로 본다."""
+    with conn.cursor() as cur:
+        cur.execute("""select i.kind, p.date from prices_daily p join instruments i on i.id = p.instrument_id
+                       where i.market = 'KR' and p.source = 'data.go.kr' and p.date >= %s
+                       group by i.kind, p.date having count(*) >= 100""", (since,))
+        return {(k, str(d)) for k, d in cur.fetchall()}
