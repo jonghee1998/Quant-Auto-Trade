@@ -42,17 +42,20 @@ def test_fred_skips_missing_and_keeps_release_date():
     f = FakeFetch((200, {"observations": [
         {"date": "2024-01-01", "realtime_start": "2024-01-05", "value": "13.2"},
         {"date": "2024-01-02", "realtime_start": "2024-01-05", "value": "."}]}))
-    assert S.fred_series(f, "VIXCLS", date(2024, 1, 1), "FAKE") == [
-        {"series": "VIXCLS", "ref_date": "2024-01-01", "release_date": "2024-01-05", "value": 13.2, "source": "fred"}]
+    assert S.fred_series(f, "CPIAUCSL", date(2024, 1, 1), "FAKE") == [
+        {"series": "CPIAUCSL", "ref_date": "2024-01-01", "release_date": "2024-01-05", "value": 13.2, "source": "fred"}]
     assert f.calls[0][1]["output_type"] == 4 and f.calls[0][1]["realtime_start"] == "1776-07-04"
+    g = FakeFetch((200, {"observations": [{"date": "2024-01-01", "realtime_start": "2026-11-26", "value": "13.2"}]}))
+    assert S.fred_series(g, "VIXCLS", date(2024, 1, 1), "FAKE")[0]["release_date"] == "2024-01-02"  # 일간: 다음 날
+    assert "output_type" not in g.calls[0][1]  # 빈티지 수천 개 → FRED 400 방지
 
 
 def test_fred_without_vintage_history_uses_conservative_lag():
     # 빈티지가 없으면 realtime_start가 수년 뒤 → 실제 발표일로 믿지 않는다(미래 데이터 방지)
     f = FakeFetch((200, {"observations": [{"date": "2010-03-01", "realtime_start": "2019-06-01", "value": "1"},
                                           {"date": "2010-03-01", "realtime_start": "2010-04-02", "value": "2"}]}))
-    daily = S.fred_series(f, "VIXCLS", date(2010, 1, 1), "FAKE")
-    assert daily[0]["release_date"] == "2010-03-02" and daily[1]["release_date"] == "2010-04-02"
+    weekly = S.fred_series(f, "NFCI", date(2010, 1, 1), "FAKE")
+    assert weekly[0]["release_date"] == "2010-04-05" and weekly[1]["release_date"] == "2010-04-02"
     f2 = FakeFetch((200, {"observations": [{"date": "2010-03-01", "realtime_start": "2019-06-01", "value": "1"}]}))
     assert S.fred_series(f2, "CPIAUCSL", date(2010, 1, 1), "FAKE")[0]["release_date"] == "2010-04-05"
 
