@@ -44,8 +44,9 @@ def company_facts(fetch: Fetch, cik: int, ticker: str, user_agent: str) -> list[
                                  "period_start": it.get("start"), "period_end": it["end"],
                                  "fiscal_period": f"{it.get('fy')}{it.get('fp') or ''}", "value": float(it["val"]),
                                  "filed_date": it["filed"], "form": it["form"], "source": "sec"})
-            break  # 앞 태그가 있으면 뒤 태그는 안 씀
-    # 같은 (개념, 기간, 접수일) 중복 제거
+        # 태그를 모두 본다: 회사마다·해마다 쓰는 태그가 바뀐다(예: 매출이 Revenues → RevenueFromContract...).
+        # 같은 기간이 여러 태그에 있으면 아래 중복 제거에서 앞 태그 값이 남는다.
+    # 같은 (개념, 기간, 접수일) 중복 제거 — 앞 태그 우선
     seen, out = set(), []
     for r in rows:
         k = (r["concept"], r["period_start"], r["period_end"], r["filed_date"], r["unit"])

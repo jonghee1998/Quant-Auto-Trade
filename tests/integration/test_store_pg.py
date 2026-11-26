@@ -107,3 +107,16 @@ def test_snapshot_save_keeps_ai_part(conn):
     with conn.cursor() as cur:
         cur.execute("select payload->'ai'->'market'->>'us', payload->>'summary', jsonb_array_length(payload->'quotes') from daily_brief where date = %s", (day,))
         assert cur.fetchone() == ("합성", "합성2", 1)
+
+
+
+def test_fundamentals_quarter_and_ytd_same_end_both_kept(conn):
+    # 10-Q: 같은 끝 날짜·접수일로 3개월 값과 6개월 누적 값 → 둘 다 남아야 한다(전엔 서로 덮어씀)
+    from quant.ingest import store
+    base = {"market": "US", "code": "TEST02", "concept": "revenue", "unit": "USD", "period_end": "2024-06-30",
+            "fiscal_period": "2024Q2", "filed_date": "2024-08-01", "form": "10-Q", "source": "test"}
+    store.upsert_fundamentals(conn, [dict(base, period_start="2024-04-01", value=100.0),
+                                     dict(base, period_start="2024-01-01", value=190.0)])
+    with conn.cursor() as cur:
+        cur.execute("select period_days, value from fundamentals where code = 'TEST02' order by period_days")
+        assert cur.fetchall() == [(90, 100.0), (181, 190.0)]

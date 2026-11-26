@@ -1,7 +1,7 @@
 """수집 행 → Postgres upsert. 연결은 주입받는다(psycopg 3 호환 연결)."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Iterable
 
 
@@ -65,13 +65,20 @@ def upsert_news(conn, rows: list[dict]) -> int:
     return len(rows)
 
 
+def _days(r: dict) -> int:
+    """기간 길이(일). 분기(약 90일)와 누적(180·270일), 시점 값(0)을 구분하는 키."""
+    if not r.get("period_start"):
+        return 0
+    return (date.fromisoformat(str(r["period_end"])[:10]) - date.fromisoformat(str(r["period_start"])[:10])).days
+
+
 def upsert_fundamentals(conn, rows: list[dict]) -> int:
     with conn.cursor() as cur:
         cur.executemany(
-            """insert into fundamentals (market, code, concept, unit, period_start, period_end, fiscal_period, value,
-                 filed_date, form, source) values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-               on conflict (market, code, concept, unit, period_end, filed_date) do update set value = excluded.value""",
-            [(r["market"], r["code"], r["concept"], r["unit"], r.get("period_start"), r["period_end"],
+            """insert into fundamentals (market, code, concept, unit, period_start, period_end, period_days, fiscal_period, value,
+                 filed_date, form, source) values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+               on conflict (market, code, concept, unit, period_end, period_days, filed_date) do update set value = excluded.value""",
+            [(r["market"], r["code"], r["concept"], r["unit"], r.get("period_start"), r["period_end"], _days(r),
               r.get("fiscal_period"), r["value"], r["filed_date"], r.get("form"), r["source"]) for r in rows])
     return len(rows)
 
