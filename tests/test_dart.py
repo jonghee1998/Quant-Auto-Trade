@@ -64,12 +64,15 @@ def test_ofs_when_no_consolidated_and_q4_derived():
     assert q4[0]["filed_date"] == "2025-03-20" and q4[0]["fiscal_period"] == "2024Q4"
 
 
-def test_collect_batches_and_no_data_status():
+def test_jobs_one_per_report_batch_and_zip_once():
     ok = Response(200, json.dumps({"status": "000", "list": [_it("매출액", "10", "10", dt="2024.01.01 ~ 2024.03.31", rcept="20240515000001")]}))
     none = Response(200, json.dumps({"status": "013", "message": "조회된 데이타가 없습니다."}))
-    f = Fake(Response(200, "", CORP), *([ok] + [none] * 3))
-    rows = D.collect(f, "FAKEKEY", ["000003", "999999"], date(2024, 6, 1), years=1)
+    js = D.jobs("FAKEKEY", ["000003", "999999"], date(2024, 6, 1), years=1)
+    assert [n for n, _ in js] == ["2024Q1 1/1", "2024Q2 1/1", "2024Q3 1/1", "2024FY 1/1"]
+    f = Fake(Response(200, "", CORP), ok, none, none, none)
+    rows = [r for _, fn in js for r in fn(f)]
     assert [r["value"] for r in rows] == [10.0]
+    assert sum("corpCode" in u for u, _ in f.calls) == 1  # ZIP은 한 번만
     assert f.calls[1][1]["corp_code"] == "00000003" and f.calls[1][1]["reprt_code"] == "11013"
 
 

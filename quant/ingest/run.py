@@ -56,7 +56,8 @@ def plan(env: dict, today: date, days: int, kr_have: set[tuple[str, str]] | None
         for t in U.US_NEWS_TICKERS:
             jobs.append(("finnhub", t, lambda f, t=t: S.finnhub_news(f, t, today - timedelta(days=2), today, env["FINNHUB_TOKEN"]), "news"))
     if env.get("OPENDART_KEY") and kr_top:  # 화면에 오르는 한국 주식(거래대금 상위)만, 최근 3년
-        jobs.append(("opendart", f"재무 {len(kr_top)}종목", lambda f: dart.collect(f, env["OPENDART_KEY"], kr_top, today), "fundamentals"))
+        for name, fn in dart.jobs(env["OPENDART_KEY"], kr_top, today):
+            jobs.append(("opendart", name, fn, "fundamentals"))
     if env.get("SEC_USER_AGENT"):
         ua = env["SEC_USER_AGENT"]
         cache: dict = {}
