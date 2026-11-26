@@ -68,7 +68,8 @@ def test_pick_news_prefers_market_news_and_drops_pr_and_clickbait():
         {"title": "2 Ways 합성기업 Pays Off for Investors", "source": "finnhub", "publisher": "Motley Fool"},
         {"title": "Should You Buy 합성기업 Stock?", "source": "finnhub", "publisher": "Zacks"},
         {"title": "합성 종목 실적 발표", "source": "finnhub", "publisher": "합성통신"},
-        {"title": "Stocks fall as yields climb (합성)", "source": "finnhub_market", "publisher": "합성통신"},
+        {"title": "합성국 elections near as leader seeks reelection - Reuters", "source": "finnhub_market", "publisher": "합성통신"},
+        {"title": "Stocks fall as yields climb (합성) - Reuters", "source": "finnhub_market", "publisher": "합성통신"},
         {"title": "Fed holds rates (합성)", "source": "finnhub_market", "publisher": "합성통신"},
     ]
     p = SN.pick_news(news)
