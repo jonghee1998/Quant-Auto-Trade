@@ -80,6 +80,9 @@ def test_naver_news_cleans_title_and_parses_date():
     [r] = S.naver_news(f, "코스피", "ID", "SECRET")
     assert r["title"] == "합성 뉴스 & 시장" and r["url"] == "https://example.com/a"
     assert r["published_at"] == "2024-01-02T09:00:00+09:00" and len(r["url_hash"]) == 32
+    url, _, headers = f.calls[0]
+    assert url == "https://naverapihub.apigw.ntruss.com/search/v1/news"  # 예전 openapi.naver.com은 HUB 키를 401로 거부
+    assert headers == {"X-NCP-APIGW-API-KEY-ID": "ID", "X-NCP-APIGW-API-KEY": "SECRET"}
 
 
 def test_finnhub_news_tags_ticker():
