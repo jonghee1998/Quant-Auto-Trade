@@ -14,10 +14,12 @@ def _px():
 
 def test_build_payload_shape_and_nulls():
     idx = pd.bdate_range("2023-01-02", periods=300)
-    macro = {"VIXCLS": pd.Series(np.r_[np.full(299, 15.0), 22.0], index=idx), "DEXKOUS": pd.Series(np.linspace(1300, 1390, 300), index=idx)}
+    macro = {"VIXCLS": pd.Series(np.r_[np.full(299, 15.0), 22.0], index=idx), "DEXKOUS": pd.Series(np.linspace(1300, 1390, 300), index=idx),
+             "VXVCLS": pd.Series(18.0, index=idx), "BAMLH0A0HYM2": pd.Series(np.linspace(3, 4, 300), index=idx)}  # 신호등 위험까지 계산(JSON 확인)
     news = [{"title": "합성 헤드라인", "source": "finnhub"}, {"title": "합성 기사", "source": "naver"}]
-    p = SN.build_payload(_px(), macro, news, as_of="2024-02-23")
-    json.dumps(p)  # JSON 직렬화 가능(NaN 없음)
+    p = SN.build_payload(_px(), macro, news, as_of="2024-02-23", kr_totals={"stock": np.int64(5)})
+    json.dumps(p)  # JSON 직렬화 가능(NaN·numpy 값 없음)
+    assert p["signals"]["items"][2]["good"] is not None
     assert "NaN" not in json.dumps(p)
     q = {x["id"]: x for x in p["quotes"]}
     assert q["vix"]["value"] == 22.0 and q["vix"]["changeText"] == "+7.0"
