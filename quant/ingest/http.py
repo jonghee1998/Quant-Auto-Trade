@@ -11,6 +11,7 @@ from typing import Any, Callable, Mapping, Protocol
 class Response:
     status: int
     text: str
+    content: bytes = b""  # 압축 파일 등 글자가 아닌 응답(OpenDART 회사 코드 ZIP)
 
     def json(self) -> Any:
         return json.loads(self.text)
@@ -38,7 +39,7 @@ def requests_fetch(timeout: tuple[float, float] = (10.0, 60.0)) -> Fetch:
         except requests.RequestException as e:
             # requests 예외 메시지에는 쿼리(키 포함)가 든 URL이 들어간다 → 종류만 남긴다
             return Response(NETWORK_ERROR, type(e).__name__)
-        return Response(r.status_code, r.text)
+        return Response(r.status_code, r.text, r.content)
     return fetch
 
 
@@ -63,6 +64,11 @@ def get_text(fetch: Fetch, url: str, params=None, headers=None, *, source: str,
              retries: int = 2, sleep: Callable[[float], None] = time.sleep) -> str:
     """get_json과 같은 재시도·오류 규칙, 본문은 글자 그대로(RSS 등)."""
     return _get(fetch, url, params, headers, source=source, retries=retries, sleep=sleep).text
+
+
+def get_bytes(fetch: Fetch, url: str, params=None, headers=None, *, source: str,
+              retries: int = 2, sleep: Callable[[float], None] = time.sleep) -> bytes:
+    return _get(fetch, url, params, headers, source=source, retries=retries, sleep=sleep).content
 
 
 def _get(fetch: Fetch, url: str, params, headers, *, source: str, retries: int, sleep: Callable[[float], None]):

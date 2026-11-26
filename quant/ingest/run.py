@@ -13,16 +13,16 @@ import os
 from datetime import date, timedelta
 from typing import Callable
 
-from . import sec, sources as S, store, universe as U
+from . import dart, sec, sources as S, store, universe as U
 from .http import Fetch, redact, requests_fetch
 from .quality import check_prices
 
 ENV = {"tiingo": ["TIINGO_TOKEN"], "fred": ["FRED_API_KEY"], "kr": ["DATA_GO_KR_KEY"],
-       "naver": ["NAVER_CLIENT_ID", "NAVER_CLIENT_SECRET"], "finnhub": ["FINNHUB_TOKEN"], "sec": ["SEC_USER_AGENT"]}
+       "naver": ["NAVER_CLIENT_ID", "NAVER_CLIENT_SECRET"], "finnhub": ["FINNHUB_TOKEN"], "sec": ["SEC_USER_AGENT"], "opendart": ["OPENDART_KEY"]}
 
 
-def plan(env: dict, today: date, days: int, kr_have: set[tuple[str, str]] | None = None
-         ) -> list[tuple[str, str, Callable[[Fetch], list[dict]], str]]:
+def plan(env: dict, today: date, days: int, kr_have: set[tuple[str, str]] | None = None,
+         kr_top: list[str] | None = None) -> list[tuple[str, str, Callable[[Fetch], list[dict]], str]]:
     """(source, dataset, 수집함수, 저장 종류). 키가 없는 소스는 빠진다.
     kr_have: 이미 받은 data.go.kr (kind, 날짜) — 다시 받지 않는다(하루치가 2분쯤 걸려 이어 받기가 필요)."""
     kr_have = kr_have or set()
@@ -55,6 +55,8 @@ def plan(env: dict, today: date, days: int, kr_have: set[tuple[str, str]] | None
         jobs.append(("finnhub", "market", lambda f: S.finnhub_market_news(f, env["FINNHUB_TOKEN"]), "news"))
         for t in U.US_NEWS_TICKERS:
             jobs.append(("finnhub", t, lambda f, t=t: S.finnhub_news(f, t, today - timedelta(days=2), today, env["FINNHUB_TOKEN"]), "news"))
+    if env.get("OPENDART_KEY") and kr_top:  # 화면에 오르는 한국 주식(거래대금 상위)만, 최근 3년
+        jobs.append(("opendart", f"재무 {len(kr_top)}종목", lambda f: dart.collect(f, env["OPENDART_KEY"], kr_top, today), "fundamentals"))
     if env.get("SEC_USER_AGENT"):
         ua = env["SEC_USER_AGENT"]
         cache: dict = {}
@@ -92,7 +94,10 @@ def run(env: dict, fetch: Fetch, conn=None, today: date | None = None, days: int
         kr_have = store.kr_done(conn, today - timedelta(days=days))
         if kr_have:
             out(f"data.go.kr: 이미 받은 {len(kr_have)}개(종류·날짜)는 건너뜀")
-    jobs = plan(env, today, days, kr_have)
+    kr_top: list[str] = []
+    if conn and env.get("OPENDART_KEY") and (not sources or "opendart" in sources):
+        kr_top = store.kr_top_stocks(conn, 300)
+    jobs = plan(env, today, days, kr_have, kr_top)
     if sources:
         jobs = [j for j in jobs if j[0] in sources]
         out(f"고른 소스만: {', '.join(sorted(sources))}")

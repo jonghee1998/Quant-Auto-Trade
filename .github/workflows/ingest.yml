@@ -44,6 +44,7 @@ jobs:
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
           FINNHUB_TOKEN: ${{ secrets.FINNHUB_TOKEN }}
           SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+          OPENDART_KEY: ${{ secrets.OPENDART_KEY }}
           SOURCES: ${{ inputs.sources || '' }}
         run: python -m quant.ingest.run --days "${{ inputs.days || '5' }}" --sources "$SOURCES"
       - name: Snapshot for app (DB가 있을 때만)

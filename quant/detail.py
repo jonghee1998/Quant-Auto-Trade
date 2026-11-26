@@ -81,6 +81,15 @@ def fundamentals_view(rows: pd.DataFrame, price: float | None) -> dict:
         rows[c] = pd.to_datetime(rows[c])
     rows["len"] = (rows["period_end"] - rows["period_start"]).dt.days
     rows = rows.sort_values("filed_date").drop_duplicates(["concept", "period_start", "period_end"], keep="last")
+    # 4분기는 연간 보고서에만 있다 → 1년 − 같은 해 시작의 9개월 누적. 접수일은 연간 보고서 날짜(그 전엔 몰랐다)
+    annual = rows[rows["len"].between(350, 380)]
+    nine = rows[rows["len"].between(260, 280)]
+    q4 = annual.merge(nine, on=["concept", "period_start"], suffixes=("", "_9"))
+    if len(q4):
+        q4 = q4.assign(period_start=q4["period_end_9"] + pd.Timedelta(days=1), value=q4["value"] - q4["value_9"])
+        q4 = q4.assign(len=(q4["period_end"] - q4["period_start"]).dt.days)[rows.columns]
+        rows = pd.concat([rows, q4[q4["len"].between(80, 100)]], ignore_index=True)
+        rows = rows.drop_duplicates(["concept", "period_start", "period_end"], keep="first")
 
     def quarters(concept: str) -> pd.Series:
         q = rows[(rows["concept"] == concept) & rows["len"].between(80, 100)]
@@ -89,11 +98,11 @@ def fundamentals_view(rows: pd.DataFrame, price: float | None) -> dict:
         return out
 
     out: dict = {"quarters": []}
-    rev, ni = quarters("revenue"), quarters("net_income")
+    rev, ni, op = quarters("revenue"), quarters("net_income"), quarters("op_income")
     for d in rev.index[-8:]:
         prev = rev[(rev.index >= d - pd.Timedelta(days=380)) & (rev.index <= d - pd.Timedelta(days=350))]
         out["quarters"].append({
-            "end": d.strftime("%Y-%m-%d"), "revenue": _f(rev[d], 0), "netIncome": _f(ni.get(d), 0),
+            "end": d.strftime("%Y-%m-%d"), "revenue": _f(rev[d], 0), "netIncome": _f(ni.get(d), 0), "opIncome": _f(op.get(d), 0),
             "revYoY": _f((rev[d] / prev.iloc[-1] - 1) * 100, 1) if len(prev) and prev.iloc[-1] > 0 else None})
     eps = rows[(rows["concept"] == "eps_diluted") & rows["len"].between(350, 380)].sort_values("period_end")
     if price and len(eps) and eps["value"].iloc[-1] > 0:
@@ -145,7 +154,7 @@ def build(payload: dict, us: pd.DataFrame, kr: pd.DataFrame, macro_long: dict[st
             continue
         s = px[u["code"]]
         d = {"chart": weekly_chart(s), "stats": price_stats(s, bench.get(u["market"]))}
-        f = fundamentals.get(u["code"]) if u["market"] == "US" else None
+        f = fundamentals.get((u["market"], u["code"])) if u.get("kind") == "주식" else None
         if f is not None and not f.empty:
             d["fund"] = fundamentals_view(f, _f(s.dropna().iloc[-1]))
         out[f"{u['market']}:{u['code']}"] = d
@@ -179,9 +188,10 @@ def load_inputs(conn, kr_codes: list[str]) -> tuple[pd.DataFrame, pd.DataFrame, 
         cur.execute("""select distinct on (series, ref_date) series, ref_date, value from macro_series
                        where ref_date >= current_date - 3660 order by series, ref_date, release_date desc""")
         mc = pd.DataFrame(cur.fetchall(), columns=["series", "date", "value"])
-        cur.execute("""select code, concept, period_start, period_end, value, filed_date from fundamentals
-                       where market = 'US' and code = any(%s) and filed_date >= current_date - 1500""", (list(US_STOCKS),))
-        fd = pd.DataFrame(cur.fetchall(), columns=["code", "concept", "period_start", "period_end", "value", "filed_date"])
+        cur.execute("""select market, code, concept, period_start, period_end, value, filed_date from fundamentals
+                       where ((market = 'US' and code = any(%s)) or (market = 'KR' and code = any(%s)))
+                         and filed_date >= current_date - 1500""", (list(US_STOCKS), kr_codes))
+        fd = pd.DataFrame(cur.fetchall(), columns=["market", "code", "concept", "period_start", "period_end", "value", "filed_date"])
 
     def table(m):
         p = px[px["market"] == m]
@@ -191,4 +201,4 @@ def load_inputs(conn, kr_codes: list[str]) -> tuple[pd.DataFrame, pd.DataFrame, 
         t.index = pd.to_datetime(t.index)
         return t
     macro = {k: g.set_index(pd.to_datetime(g["date"]))["value"].sort_index() for k, g in mc.groupby("series")} if len(mc) else {}
-    return table("US"), table("KR"), macro, {c: g.drop(columns="code") for c, g in fd.groupby("code")}
+    return table("US"), table("KR"), macro, {k: g.drop(columns=["market", "code"]) for k, g in fd.groupby(["market", "code"])}

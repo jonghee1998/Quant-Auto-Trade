@@ -17,6 +17,7 @@ export default async function Stock({ params, searchParams }: { params: Promise<
   const det = item ? await getDetail(`${item.market}:${item.code}`) : null;
   const st = det?.stats;
   const f = det?.fund;
+  const KR = item?.market === 'KR';
   const r = item?.r ?? [null, null, null];
   const b = d.bench[item?.market ?? 'US'];
   return (
@@ -71,23 +72,25 @@ export default async function Stock({ params, searchParams }: { params: Promise<
           </div>
         </section>
       ) : <Connecting reason="1년 흐름·위험은 다음 수집 뒤 채워져요" />)}
-      {item && item.market === 'US' && item.kind === '주식' ? (f && f.quarters.length ? (
+      {item && item.kind === '주식' && item.market !== 'W' ? (f && f.quarters.length ? (
         <section className="card">
-          <h2>재무 <span className="sub" style={{ fontWeight: 400 }}>미국 SEC 공시 · {f.filed} 접수분까지</span></h2>
-          <div style={{ display: 'flex', gap: 16, marginTop: 8, fontSize: 13 }}>
+          <h2>재무 <span className="sub" style={{ fontWeight: 400 }}>{item.market === 'KR' ? '전자공시(OpenDART)' : '미국 SEC 공시'} · {f.filed} 접수분까지</span></h2>
+          {(f.per != null || f.pbr != null) && (
+            <div style={{ display: 'flex', gap: 16, marginTop: 8, fontSize: 13 }}>
             <span>PER <b>{f.per ?? '—'}</b>{f.epsYear ? <span className="sub"> ({f.epsYear} 연간 이익 기준)</span> : null}</span>
             <span>PBR <b>{f.pbr ?? '—'}</b></span>
-          </div>
+            </div>
+          )}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 0.8fr', rowGap: 6, fontSize: 13, textAlign: 'right', marginTop: 10 }}>
-            <span className="sub" style={{ textAlign: 'left' }}>분기 끝</span><span className="sub">매출</span><span className="sub">순이익</span><span className="sub">매출 1년 전 대비</span>
+            <span className="sub" style={{ textAlign: 'left' }}>분기 끝</span><span className="sub">매출</span><span className="sub">{KR ? '영업이익' : '순이익'}</span><span className="sub">매출 1년 전 대비</span>
             {f.quarters.slice().reverse().map((q) => (
-              <Quarter key={q.end} q={q} />
+              <Quarter key={q.end} q={q} op={KR} />
             ))}
           </div>
-          <div className="sub" style={{ marginTop: 8, lineHeight: 1.5 }}>단위 억 달러. PER = 주가 ÷ 1년 이익(낮을수록 이익 대비 싸다), PBR = 주가 ÷ 장부상 순자산.</div>
+          <div className="sub" style={{ marginTop: 8, lineHeight: 1.5 }}>{KR ? '단위 억 원. 연결 재무 기준(없으면 개별). 4분기 = 1년 − 3분기 누적.' : '단위 억 달러. PER = 주가 ÷ 1년 이익(낮을수록 이익 대비 싸다), PBR = 주가 ÷ 장부상 순자산.'}</div>
         </section>
       ) : <Connecting reason="재무는 다음 수집 뒤 채워져요" />) : item && (
-        item.market === 'KR' && item.kind === '주식' ? <Planned title="재무" note="한국 종목 재무(매출·이익, PER·PBR)는 OpenDART 연결 뒤 붙여요." /> : null
+        null
       )}
       <div style={{ margin: '12px 16px 0' }}><Link href="/terms" className="sub">용어 풀이 보기 ›</Link></div>
     </main>
@@ -106,12 +109,12 @@ function Stat({ label, value, hint }: { label: string; value: string; hint: stri
 
 const eok = (v: number | null) => (v == null ? '—' : (v / 1e8).toLocaleString('ko-KR', { maximumFractionDigits: 0 }));
 
-function Quarter({ q }: { q: { end: string; revenue: number | null; netIncome: number | null; revYoY: number | null } }) {
+function Quarter({ q, op }: { q: { end: string; revenue: number | null; netIncome: number | null; opIncome?: number | null; revYoY: number | null }; op: boolean }) {
   return (
     <>
       <span style={{ textAlign: 'left' }}>{q.end.slice(2, 7).replace('-', '.')}</span>
       <span>{eok(q.revenue)}</span>
-      <span className={tone(q.netIncome)}>{eok(q.netIncome)}</span>
+      <span className={tone(op ? q.opIncome ?? null : q.netIncome)}>{eok(op ? q.opIncome ?? null : q.netIncome)}</span>
       <span className={tone(q.revYoY)}>{pct(q.revYoY)}</span>
     </>
   );

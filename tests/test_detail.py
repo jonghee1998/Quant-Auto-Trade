@@ -63,3 +63,14 @@ def test_build_is_json_safe():
     out = DT.build(payload, us, kr, {"VIXCLS": pd.Series(np.linspace(15, 25, 300), index=idx)}, {})
     assert set(out) >= {"US:XLK", "KR:TEST01", "Q:spx", "Q:korea", "Q:vix"} and "KR:NONE" not in out
     json.dumps(out, allow_nan=False)
+
+
+def test_fundamentals_q4_from_annual_minus_nine_months():
+    T = pd.Timestamp
+    rows = [
+        {"concept": "revenue", "period_start": T("2023-01-30"), "period_end": T("2023-10-29"), "value": 300, "filed_date": T("2023-11-20")},
+        {"concept": "revenue", "period_start": T("2023-01-30"), "period_end": T("2024-01-28"), "value": 420, "filed_date": T("2024-02-21")},
+        {"concept": "revenue", "period_start": T("2023-07-31"), "period_end": T("2023-10-29"), "value": 110, "filed_date": T("2023-11-20")},
+    ]
+    q = DT.fundamentals_view(pd.DataFrame(rows), price=None)["quarters"]
+    assert [(x["end"], x["revenue"]) for x in q] == [("2023-10-29", 110), ("2024-01-28", 120)]
