@@ -6,6 +6,7 @@ python -m quant.snapshot  (DATABASE_URL 필요)
 from __future__ import annotations
 
 import json
+import re
 import math
 import os
 from datetime import date
@@ -107,22 +108,36 @@ def pick_kr(rows: pd.DataFrame, n_stock: int = 300, n_etf: int = 100) -> tuple[p
 
 
 KR_NEWS_SOURCES = {"naver", "google_news"}
+# 시장과 상관없는 기업 홍보(보도자료 배포사)와 종목 추천 낚시형 제목은 홈에서 뺀다
+PR_PUBLISHERS = ("globenewswire", "pr newswire", "prnewswire", "business wire", "businesswire", "accesswire",
+                 "newsfile", "einpresswire")
+CLICKBAIT = re.compile(r"^\d+\s+(ways|reasons|stocks?|things)\b|should you buy|better buy|time to buy|millionaire|"
+                       r"(top|best)\s+\d*\s*stocks? to|buy (and|&) hold forever|no-brainer|could soar|i'?m buying",
+                       re.IGNORECASE)
+
+
+def _home_ok(x: dict) -> bool:
+    pub = (x.get("publisher") or "").lower()
+    return not any(p in pub for p in PR_PUBLISHERS) and not CLICKBAIT.search(x["title"])
 
 
 def pick_news(news: list[dict], n_us: int = 3, n_kr: int = 2) -> list[dict]:
-    """홈 뉴스: 최신순으로 미국 n_us·한국 n_kr. 언론사만 다르고 같은 제목은 하나로."""
+    """홈 뉴스: 최신순으로 미국 n_us·한국 n_kr. 미국은 시장 전체 뉴스를 먼저, 모자라면 종목 뉴스.
+    보도자료·낚시형 제목은 빼고, 언론사만 다른 같은 제목은 하나로."""
     from .news_features import norm_title
-    seen, us, kr = set(), [], []
+    seen, kr = set(), []
+    us_market, us_ticker = [], []
     for x in news:
         key = norm_title(x["title"])[:30]
-        if not key or key in seen:
+        if not key or key in seen or not _home_ok(x):
             continue
         seen.add(key)
-        is_kr = x.get("source") in KR_NEWS_SOURCES
-        bucket, cap = (kr, n_kr) if is_kr else (us, n_us)
-        if len(bucket) < cap:
-            bucket.append({"title": x["title"], "where": "한국" if is_kr else "미국"})
-    return us + kr
+        if x.get("source") in KR_NEWS_SOURCES:
+            if len(kr) < n_kr:
+                kr.append({"title": x["title"], "where": "한국"})
+        else:
+            (us_market if x.get("source") == "finnhub_market" else us_ticker).append({"title": x["title"], "where": "미국"})
+    return (us_market + us_ticker)[:n_us] + kr
 
 
 def build_payload(us_px: pd.DataFrame, macro: dict[str, pd.Series], news: list[dict], kr_px: pd.DataFrame | None = None,
@@ -167,12 +182,12 @@ def load_from_db(conn, days: int = 400) -> tuple[pd.DataFrame, dict, list[dict]]
         cur.execute("""select distinct on (series, ref_date) series, ref_date, value from macro_series
                        where ref_date >= current_date - %s order by series, ref_date, release_date desc""", (days,))
         mc = pd.DataFrame(cur.fetchall(), columns=["series", "date", "value"])
-        # 미국 뉴스가 하루 수백 건이라 최신 N건만 보면 한국이 밀려난다 → 한국/미국 따로 최신 50건씩
-        cur.execute("""select title, source from (
-                         select title, source, published_at, row_number() over (
-                           partition by source in ('naver', 'google_news') order by published_at desc) as rn from news) t
+        # 미국 종목 뉴스가 하루 수백 건이라 최신 N건만 보면 다른 소스가 밀려난다 → 소스마다 최신 50건씩
+        cur.execute("""select title, source, publisher from (
+                         select title, source, publisher, published_at,
+                                row_number() over (partition by source order by published_at desc) as rn from news) t
                        where rn <= 50 order by published_at desc""")
-        news = [{"title": t, "source": s} for t, s in cur.fetchall()]
+        news = [{"title": t, "source": s, "publisher": p} for t, s, p in cur.fetchall()]
     us = px.pivot(index="date", columns="code", values="close").sort_index() if len(px) else pd.DataFrame()
     us.index = pd.to_datetime(us.index)
     macro = {k: g.set_index(pd.to_datetime(g["date"]))["value"].sort_index() for k, g in mc.groupby("series")} if len(mc) else {}

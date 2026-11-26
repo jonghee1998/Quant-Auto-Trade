@@ -277,3 +277,10 @@ def test_google_news_parses_rss_without_key():
 def test_plan_has_kr_news_without_naver_key():
     from quant.ingest.run import plan
     assert {s for s, *_ in plan({}, date(2024, 1, 5), 1)} == {"google_news"}
+
+
+def test_finnhub_market_news_is_marked_market():
+    f = FakeFetch((200, [{"url": "https://example.com/m", "headline": " 합성 시장 뉴스 ", "source": "합성통신", "datetime": 1704153600}]))
+    [r] = S.finnhub_market_news(f, "FAKE")
+    assert r["source"] == "finnhub_market" and r["tickers"] == [] and r["title"] == "합성 시장 뉴스"
+    assert f.calls[0][0].endswith("/api/v1/news") and f.calls[0][1] == {"category": "general"}

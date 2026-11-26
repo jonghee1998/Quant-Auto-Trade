@@ -60,3 +60,16 @@ def test_pick_news_balances_and_dedupes():
     p = SN.pick_news(news)
     assert [x["where"] for x in p] == ["미국"] * 3 + ["한국"] * 2
     assert [x["title"] for x in p if x["where"] == "한국"] == ["합성 증시 마감", "합성 환율"]
+
+
+def test_pick_news_prefers_market_news_and_drops_pr_and_clickbait():
+    news = [
+        {"title": "합성기업 Launches Center of Excellence", "source": "finnhub", "publisher": "GlobeNewswire"},
+        {"title": "2 Ways 합성기업 Pays Off for Investors", "source": "finnhub", "publisher": "Motley Fool"},
+        {"title": "Should You Buy 합성기업 Stock?", "source": "finnhub", "publisher": "Zacks"},
+        {"title": "합성 종목 실적 발표", "source": "finnhub", "publisher": "합성통신"},
+        {"title": "Stocks fall as yields climb (합성)", "source": "finnhub_market", "publisher": "합성통신"},
+        {"title": "Fed holds rates (합성)", "source": "finnhub_market", "publisher": "합성통신"},
+    ]
+    p = SN.pick_news(news)
+    assert [x["title"] for x in p] == ["Stocks fall as yields climb (합성)", "Fed holds rates (합성)", "합성 종목 실적 발표"]
