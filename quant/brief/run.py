@@ -1,7 +1,7 @@
-"""CLI. prepare: DB → .brief/in-<part>.json / save: .brief/out-<part>.json 검사 → daily_brief.payload["ai"].
+"""CLI. prepare: DB → brief-io/in-<part>.json / save: brief-io/out-<part>.json 검사 → daily_brief.payload["ai"].
 
-python -m quant.brief.run prepare --dir .brief
-python -m quant.brief.run save --dir .brief
+python -m quant.brief.run prepare --dir brief-io
+python -m quant.brief.run save --dir brief-io
 """
 from __future__ import annotations
 
@@ -112,7 +112,7 @@ def save(conn, d: Path, out=print) -> dict[str, str]:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=["prepare", "save"])
-    ap.add_argument("--dir", default=".brief")
+    ap.add_argument("--dir", default="brief-io")
     a = ap.parse_args()
     import psycopg
     with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
