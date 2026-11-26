@@ -8,6 +8,9 @@ on:
       days:
         description: '며칠 전까지 다시 받을지'
         default: '5'
+      sources:
+        description: '소스만 고르기(쉼표: tiingo,fred,data.go.kr,finnhub,sec). 빈칸=전부'
+        default: ''
 permissions:
   contents: read
 concurrency:
@@ -41,7 +44,8 @@ jobs:
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
           FINNHUB_TOKEN: ${{ secrets.FINNHUB_TOKEN }}
           SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
-        run: python -m quant.ingest.run --days "${{ inputs.days || '5' }}"
+          SOURCES: ${{ inputs.sources || '' }}
+        run: python -m quant.ingest.run --days "${{ inputs.days || '5' }}" --sources "$SOURCES"
       - name: Snapshot for app (DB가 있을 때만)
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}

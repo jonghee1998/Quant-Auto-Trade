@@ -56,7 +56,8 @@ def plan(env: dict, today: date, days: int) -> list[tuple[str, str, Callable[[Fe
 SAVE = {"fundamentals": store.upsert_fundamentals, "prices": store.upsert_prices, "macro": store.upsert_macro, "news": store.upsert_news}
 
 
-def run(env: dict, fetch: Fetch, conn=None, today: date | None = None, days: int = 5, out=print) -> dict:
+def run(env: dict, fetch: Fetch, conn=None, today: date | None = None, days: int = 5, out=print,
+        sources: set[str] | None = None) -> dict:
     today = today or date.today()
     secrets = [v for k, v in env.items() if any(w in k for w in ("KEY", "TOKEN", "SECRET", "DATABASE_URL", "AGENT")) and v]
     raw_out = out
@@ -65,7 +66,11 @@ def run(env: dict, fetch: Fetch, conn=None, today: date | None = None, days: int
     if missing:
         out(f"키 없음 → 건너뜀: {', '.join(missing)}")
     summary = {"ok": 0, "failed": 0, "rows": 0, "issues": 0}
-    for source, dataset, collect, kind in plan(env, today, days):
+    jobs = plan(env, today, days)
+    if sources:
+        jobs = [j for j in jobs if j[0] in sources]
+        out(f"고른 소스만: {', '.join(sorted(sources))}")
+    for source, dataset, collect, kind in jobs:
         run_id = store.start_run(conn, source, dataset) if conn else None
         try:
             rows = collect(fetch)
@@ -92,6 +97,7 @@ def run(env: dict, fetch: Fetch, conn=None, today: date | None = None, days: int
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--days", type=int, default=5)
+    ap.add_argument("--sources", default="", help="쉼표 구분: tiingo,fred,data.go.kr,naver,finnhub,sec (빈칸=전부)")
     a = ap.parse_args()
     env = dict(os.environ)
     conn = None
@@ -100,7 +106,8 @@ def main() -> int:
         conn = psycopg.connect(env["DATABASE_URL"])
     else:
         print("DATABASE_URL 없음 → 저장 없이 건수만 확인")
-    s = run(env, requests_fetch(), conn, days=a.days)
+    sources = {x.strip() for x in a.sources.split(",") if x.strip()} or None
+    s = run(env, requests_fetch(), conn, days=a.days, sources=sources)
     return 1 if s["ok"] == 0 and s["failed"] > 0 else 0
 
 

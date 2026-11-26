@@ -44,6 +44,17 @@ def test_fred_skips_missing_and_keeps_release_date():
         {"date": "2024-01-02", "realtime_start": "2024-01-05", "value": "."}]}))
     assert S.fred_series(f, "VIXCLS", date(2024, 1, 1), "FAKE") == [
         {"series": "VIXCLS", "ref_date": "2024-01-01", "release_date": "2024-01-05", "value": 13.2, "source": "fred"}]
+    assert f.calls[0][1]["output_type"] == 4 and f.calls[0][1]["realtime_start"] == "1776-07-04"
+
+
+def test_fred_without_vintage_history_uses_conservative_lag():
+    # 빈티지가 없으면 realtime_start가 수년 뒤 → 실제 발표일로 믿지 않는다(미래 데이터 방지)
+    f = FakeFetch((200, {"observations": [{"date": "2010-03-01", "realtime_start": "2019-06-01", "value": "1"},
+                                          {"date": "2010-03-01", "realtime_start": "2010-04-02", "value": "2"}]}))
+    daily = S.fred_series(f, "VIXCLS", date(2010, 1, 1), "FAKE")
+    assert daily[0]["release_date"] == "2010-03-02" and daily[1]["release_date"] == "2010-04-02"
+    f2 = FakeFetch((200, {"observations": [{"date": "2010-03-01", "realtime_start": "2019-06-01", "value": "1"}]}))
+    assert S.fred_series(f2, "CPIAUCSL", date(2010, 1, 1), "FAKE")[0]["release_date"] == "2010-04-05"
 
 
 def _kr_page(items, total):
@@ -133,3 +144,15 @@ def test_http_error_includes_redactable_snippet():
     with pytest.raises(HttpError) as e:
         get_json(f, "https://x", None, source="data.go.kr", sleep=lambda s: None)
     assert "SERVICE_KEY_IS_NOT_REGISTERED" in str(e.value)
+
+
+def test_run_sources_filter():
+    from quant.ingest.run import run
+    calls = []
+
+    def fetch(url, params=None, headers=None):
+        calls.append(url)
+        return Response(200, json.dumps({"observations": []}))
+    out = []
+    run({"FRED_API_KEY": "FAKEKEY1", "FINNHUB_TOKEN": "FAKEKEY2"}, fetch, None, today=date(2024, 1, 5), out=out.append, sources={"fred"})
+    assert calls and all("stlouisfed" in u for u in calls)
