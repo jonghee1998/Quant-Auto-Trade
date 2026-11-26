@@ -198,3 +198,13 @@ def test_plan_collects_us_stock_prices():
     from quant.ingest.universe import US_STOCKS
     codes = {d for s, d, _, k in plan({"TIINGO_TOKEN": "FAKE"}, date(2024, 1, 5), 5) if s == "tiingo"}
     assert set(US_STOCKS) <= codes
+
+
+def test_plan_skips_kr_dates_already_stored():
+    # 시간 예산으로 끊겨도 다음 실행이 이어서 받도록: 이미 받은 날짜는 계획에서 뺀다
+    from quant.ingest.run import plan
+    env = {"DATA_GO_KR_KEY": "FAKE"}
+    full = [d for s, d, _, _ in plan(env, date(2024, 1, 5), 2) if s == "data.go.kr"]
+    assert full == ["stock:2024-01-04", "etf:2024-01-04", "stock:2024-01-03", "etf:2024-01-03"]
+    part = [d for s, d, _, _ in plan(env, date(2024, 1, 5), 2, {("stock", "2024-01-04"), ("etf", "2024-01-03")}) if s == "data.go.kr"]
+    assert part == ["etf:2024-01-04", "stock:2024-01-03"]

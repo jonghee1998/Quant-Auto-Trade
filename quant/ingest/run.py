@@ -20,8 +20,11 @@ ENV = {"tiingo": ["TIINGO_TOKEN"], "fred": ["FRED_API_KEY"], "kr": ["DATA_GO_KR_
        "naver": ["NAVER_CLIENT_ID", "NAVER_CLIENT_SECRET"], "finnhub": ["FINNHUB_TOKEN"], "sec": ["SEC_USER_AGENT"]}
 
 
-def plan(env: dict, today: date, days: int) -> list[tuple[str, str, Callable[[Fetch], list[dict]], str]]:
-    """(source, dataset, 수집함수, 저장 종류). 키가 없는 소스는 빠진다."""
+def plan(env: dict, today: date, days: int, kr_have: set[tuple[str, str]] | None = None
+         ) -> list[tuple[str, str, Callable[[Fetch], list[dict]], str]]:
+    """(source, dataset, 수집함수, 저장 종류). 키가 없는 소스는 빠진다.
+    kr_have: 이미 받은 data.go.kr (kind, 날짜) — 다시 받지 않는다(하루치가 2분쯤 걸려 이어 받기가 필요)."""
+    kr_have = kr_have or set()
     start = today - timedelta(days=days)
     jobs = []
     if env.get("TIINGO_TOKEN"):
@@ -34,6 +37,8 @@ def plan(env: dict, today: date, days: int) -> list[tuple[str, str, Callable[[Fe
         for k in range(1, days + 1):  # 영업일 여부는 응답으로 판단(빈 응답이면 0건)
             d = today - timedelta(days=k)
             for kind in ("stock", "etf"):
+                if (kind, str(d)) in kr_have:
+                    continue
                 jobs.append(("data.go.kr", f"{kind}:{d}", lambda f, kind=kind, d=d: S.kr_daily(f, kind, d, env["DATA_GO_KR_KEY"]), "prices"))
     if env.get("NAVER_CLIENT_ID") and env.get("NAVER_CLIENT_SECRET"):
         for q in U.KR_NEWS_QUERIES:
@@ -71,7 +76,12 @@ def run(env: dict, fetch: Fetch, conn=None, today: date | None = None, days: int
     if missing:
         out(f"키 없음 → 건너뜀: {', '.join(missing)}")
     summary = {"ok": 0, "failed": 0, "rows": 0, "issues": 0, "skipped": 0}
-    jobs = plan(env, today, days)
+    kr_have = set()
+    if conn and env.get("DATA_GO_KR_KEY") and (not sources or "data.go.kr" in sources):
+        kr_have = store.kr_done(conn, today - timedelta(days=days))
+        if kr_have:
+            out(f"data.go.kr: 이미 받은 {len(kr_have)}개(종류·날짜)는 건너뜀")
+    jobs = plan(env, today, days, kr_have)
     if sources:
         jobs = [j for j in jobs if j[0] in sources]
         out(f"고른 소스만: {', '.join(sorted(sources))}")
