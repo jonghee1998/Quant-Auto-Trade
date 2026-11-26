@@ -8,7 +8,7 @@ import html
 import re
 from typing import Any
 
-from .http import Fetch, get_json
+from .http import Fetch, get_json, get_text
 
 _TAG = re.compile(r"<[^>]+>")
 
@@ -138,6 +138,28 @@ def naver_news(fetch: Fetch, query: str, client_id: str, client_secret: str, dis
         rows.append({"url_hash": url_hash(url), "url": url, "title": _clean(it.get("title", "")),
                      "publisher": None, "published_at": parsedate_to_datetime(it["pubDate"]).isoformat(),
                      "tickers": [], "source": "naver"})
+    return rows
+
+
+GOOGLE_NEWS_URL = "https://news.google.com/rss/search"
+
+
+def google_news(fetch: Fetch, query: str) -> list[dict]:
+    """한국 시장 헤드라인(키 없음). 구글 뉴스 RSS: 제목·언론사·시각만 있고 본문 요약은 없다.
+    공식 API가 아니라 형식이 바뀔 수 있다 → 파싱 실패는 HttpError처럼 이 소스만 실패로 남는다."""
+    import xml.etree.ElementTree as ET
+    text = get_text(fetch, GOOGLE_NEWS_URL, {"q": f"{query} when:1d", "hl": "ko", "gl": "KR", "ceid": "KR:ko"},
+                    {"User-Agent": "Mozilla/5.0 (quant-auto-trade)"}, source="google_news")
+    rows = []
+    for it in ET.fromstring(text).iter("item"):
+        url, title, pub = it.findtext("link"), it.findtext("title") or "", it.findtext("pubDate")
+        if not url or not pub:
+            continue
+        publisher = (it.findtext("source") or "").strip() or None
+        if publisher and title.endswith(f" - {publisher}"):  # 제목 끝의 " - 언론사"는 따로 둔다
+            title = title[: -len(publisher) - 3]
+        rows.append({"url_hash": url_hash(url), "url": url, "title": _clean(title), "publisher": publisher,
+                     "published_at": parsedate_to_datetime(pub).isoformat(), "tickers": [], "source": "google_news"})
     return rows
 
 

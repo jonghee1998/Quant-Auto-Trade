@@ -56,10 +56,20 @@ def redact(text: str, secrets) -> str:
 def get_json(fetch: Fetch, url: str, params=None, headers=None, *, source: str,
              retries: int = 2, sleep: Callable[[float], None] = time.sleep) -> Any:
     """429·5xx는 잠깐 쉬고 재시도, 그 외 실패는 HttpError."""
+    return _get(fetch, url, params, headers, source=source, retries=retries, sleep=sleep).json()
+
+
+def get_text(fetch: Fetch, url: str, params=None, headers=None, *, source: str,
+             retries: int = 2, sleep: Callable[[float], None] = time.sleep) -> str:
+    """get_json과 같은 재시도·오류 규칙, 본문은 글자 그대로(RSS 등)."""
+    return _get(fetch, url, params, headers, source=source, retries=retries, sleep=sleep).text
+
+
+def _get(fetch: Fetch, url: str, params, headers, *, source: str, retries: int, sleep: Callable[[float], None]):
     for attempt in range(retries + 1):
         r = fetch(url, params, headers)
         if r.status == 200:
-            return r.json()
+            return r
         if (r.status in (NETWORK_ERROR, 429) or r.status >= 500) and attempt < retries:
             sleep(2.0 * (attempt + 1))
             continue

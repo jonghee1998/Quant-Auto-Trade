@@ -115,7 +115,7 @@ def test_run_skips_missing_keys_and_continues_after_failure():
         return Response(200, json.dumps({"observations": [{"date": "2024-01-01", "realtime_start": "2024-01-02", "value": "1"}]}))
 
     out = []
-    s = run({"FRED_API_KEY": "FAKE"}, fetch, None, today=date(2024, 1, 5), out=out.append)
+    s = run({"FRED_API_KEY": "FAKE"}, fetch, None, today=date(2024, 1, 5), out=out.append, sources={"fred"})
     from quant.ingest.universe import FRED_SERIES
     assert s["failed"] == 1 and s["ok"] == len(FRED_SERIES) - 1
     assert any("tiingo" in o and "건너뜀" in o for o in out)
@@ -187,7 +187,7 @@ def test_run_stops_starting_jobs_after_time_budget():
         return Response(200, json.dumps({"observations": []}))
     out = []
     s = run({"FRED_API_KEY": "FAKE"}, fetch, None, today=date(2024, 1, 5), out=out.append,
-            budget_s=250, clock=lambda: now[0])
+            budget_s=250, clock=lambda: now[0], sources={"fred"})
     from quant.ingest.universe import FRED_SERIES
     assert s["ok"] == 3 and s["skipped"] == len(FRED_SERIES) - 3
     assert any("시간 부족" in o for o in out) and "건너뜀" in out[-1]
@@ -256,3 +256,24 @@ def test_upsert_prices_uses_few_round_trips():
              "close": 1.0, "source": "test"} for i in range(3000)]
     assert store.upsert_prices(Conn(), rows + rows[:5]) == 3005
     assert [c[0] for c in calls] == ["many", "one", "many"] and calls[0][1] == 3000
+
+
+GOOGLE_RSS = """<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>x</title>
+<item><title>합성 증시 마감 - 합성일보</title><link>https://news.example/a</link>
+<pubDate>Tue, 02 Jan 2024 06:30:00 GMT</pubDate><source url="https://s.example">합성일보</source></item>
+<item><title>링크 없는 기사</title><pubDate>Tue, 02 Jan 2024 06:30:00 GMT</pubDate></item>
+</channel></rss>"""
+
+
+def test_google_news_parses_rss_without_key():
+    f = FakeFetch((200, GOOGLE_RSS))
+    [r] = S.google_news(f, "코스피")
+    assert r["title"] == "합성 증시 마감" and r["publisher"] == "합성일보" and r["source"] == "google_news"
+    assert r["published_at"].startswith("2024-01-02T06:30:00")
+    url, params, _ = f.calls[0]
+    assert url == "https://news.google.com/rss/search" and params["q"] == "코스피 when:1d" and params["ceid"] == "KR:ko"
+
+
+def test_plan_has_kr_news_without_naver_key():
+    from quant.ingest.run import plan
+    assert {s for s, *_ in plan({}, date(2024, 1, 5), 1)} == {"google_news"}
