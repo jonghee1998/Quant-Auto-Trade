@@ -11,6 +11,8 @@ test('화면 실험 목록 = 코드 실험 목록(1차 30개·2차 11개, 하나
   const r2 = ROUNDS.find((r) => r.round === 2).exps.map((e) => e.id).sort();
   assert.deepEqual(r1, idsIn(src, 'ROUND1: list[Exp]', 'assert len(ROUND1)'));
   assert.deepEqual(r2, idsIn(src, 'ROUND2: list[Exp]', 'BENCHMARKS'));
+  const r3 = ROUNDS.find((r) => r.round === 3).exps.map((e) => e.id).sort();
+  assert.deepEqual(r3, idsIn(src, 'ROUND3: list[Exp]', 'BENCHMARKS3'));
 });
 
 test('실험마다 한 줄 요약·접근·결과가 다 있다', () => {
