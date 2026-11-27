@@ -5,6 +5,7 @@ import { ROUNDS } from '../lib/labRounds.ts';
 
 const idsIn = (src, from, to) => [...src.slice(src.indexOf(from), src.indexOf(to)).matchAll(/Exp\("((?:R4_)?[A-Z]\d+[a-z]?)"/g)].map((m) => m[1]).sort();
 const src = readFileSync('quant/forecast/experiments.py', 'utf8');
+const src5 = readFileSync('quant/forecast/round5.py', 'utf8');
 
 test('화면 실험 목록 = 코드 실험 목록(1차 30개·2차 11개, 하나씩 다 있음)', () => {
   const r1 = ROUNDS.find((r) => r.round === 1).exps.map((e) => e.id).sort();
@@ -15,6 +16,9 @@ test('화면 실험 목록 = 코드 실험 목록(1차 30개·2차 11개, 하나
   assert.deepEqual(r3, idsIn(src, 'ROUND3: list[Exp]', 'BENCHMARKS3'));
   const r4 = ROUNDS.find((r) => r.round === 4).exps.map((e) => e.id).sort();
   assert.deepEqual(r4, idsIn(src, 'ROUND4: list[Exp]', 'BENCHMARKS4'));
+  const r5 = ROUNDS.find((r) => r.round === 5).exps.map((e) => e.id).sort();
+  const ids5 = [...src5.slice(src5.indexOf('ROUND5: list[E5]'), src5.indexOf('BENCH5')).matchAll(/E5\("(R5_[A-Z]\d)"/g)].map((m) => m[1]).sort();
+  assert.deepEqual(r5, ids5);
 });
 
 test('실험마다 한 줄 요약·접근·결과가 다 있다', () => {
