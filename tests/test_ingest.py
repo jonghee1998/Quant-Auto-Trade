@@ -317,8 +317,9 @@ def test_kr_index_matches_exact_names_and_reports_unknown():
 def test_kr_daily_jobs_capped_even_with_huge_days():
     from quant.ingest.run import KR_DAILY_MAX_DAYS, plan
     jobs = [d for s, d, _, _ in plan({"DATA_GO_KR_KEY": "FAKE"}, date(2024, 1, 5), 7700) if s == "data.go.kr"]
-    daily = [d for d in jobs if not d.startswith("index:")]
+    daily = [d for d in jobs if not d.startswith(("index:", "etf_hist:"))]
     assert len(daily) == 2 * KR_DAILY_MAX_DAYS and any(d.startswith("index:") for d in jobs)
+    assert [d for d in jobs if d.startswith("etf_hist:")] == [f"etf_hist:{y}" for y in range(2019, 2025)]
 
 
 def test_google_news_english_is_us_source():
@@ -361,3 +362,21 @@ def test_market_monthly_rate_uses_month_plus_lag_not_alfred():
         return Response(200, json.dumps({"observations": [{"date": "2005-01-01", "value": "3.5", "realtime_start": "2015-06-01"}]}))
     rows = S.fred_series(fetch, "IR3TIB01KRM156N", __import__("datetime").date(2005, 1, 1), "TESTKEY")
     assert "output_type" not in seen and rows[0]["release_date"] == "2005-02-15"
+
+
+def test_kr_etf_history_keeps_only_plain_sp500_names():
+    from datetime import date
+    import json
+    from quant.ingest import sources as S
+    from quant.ingest.http import Response
+    items = [{"basDt": "20210104", "srtnCd": "TEST01", "itmsNm": "TIGER 미국S&P500", "clpr": "10000"},
+             {"basDt": "20210104", "srtnCd": "TEST02", "itmsNm": "KODEX 미국S&P500TR", "clpr": "11000"},
+             {"basDt": "20210104", "srtnCd": "TEST03", "itmsNm": "KODEX 미국S&P500(H)", "clpr": "9000"},
+             {"basDt": "20210104", "srtnCd": "TEST04", "itmsNm": "TIGER 미국S&P500레버리지(합성 H)", "clpr": "9000"},
+             {"basDt": "20210104", "srtnCd": "TEST05", "itmsNm": "KODEX 미국S&P500버퍼3월액티브", "clpr": "9000"}]
+
+    def fetch(url, params=None, headers=None, *a, **kw):
+        assert params["beginBasDt"] == "20210101" and params["likeItmsNm"] == "S&P500"
+        return Response(200, json.dumps({"response": {"body": {"totalCount": 5, "items": {"item": items}}}}))
+    rows = S.kr_etf_history(fetch, date(2021, 1, 1), date(2021, 12, 31), "TESTKEY")
+    assert sorted(r["code"] for r in rows) == ["TEST01", "TEST02", "TEST03"]

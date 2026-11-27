@@ -37,6 +37,11 @@ def plan(env: dict, today: date, days: int, kr_have: set[tuple[str, str]] | None
     if env.get("DATA_GO_KR_KEY"):
         for code in S.KR_INDEXES:  # 지수는 기간 한 번에(날짜당 호출 아님)
             jobs.append(("data.go.kr", f"index:{code}", lambda f, code=code: S.kr_index(f, code, start, today, env["DATA_GO_KR_KEY"]), "prices"))
+        # 검산용 국내 S&P500 ETF 과거(실험실 5차): 긴 백필(days ≥ 365)일 때만, 해마다 한 묶음
+        if days >= 365:
+            for y in range(max(2019, (today - timedelta(days=days)).year), today.year + 1):
+                s0, s1 = max(date(y, 1, 1), today - timedelta(days=days)), min(date(y, 12, 31), today)
+                jobs.append(("data.go.kr", f"etf_hist:{y}", lambda f, s0=s0, s1=s1: S.kr_etf_history(f, s0, s1, env["DATA_GO_KR_KEY"]), "prices"))
         # 전 종목 일별은 하루 4천 행: days를 크게 줘도(지수·미국 백필용) 최근 KR_DAILY_MAX_DAYS까지만 → DB 용량 보호
         for k in range(1, min(days, KR_DAILY_MAX_DAYS) + 1):  # 영업일 여부는 응답으로 판단(빈 응답이면 0건)
             d = today - timedelta(days=k)
