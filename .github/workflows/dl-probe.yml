@@ -1,0 +1,44 @@
+name: dl-probe
+# 딥러닝 트랙(Fable 설계 #74) 0단계 점검(수동): 못 받은 종목이 Tiingo에 정말 없는지, 기호·기간 문제인지 가른다.
+# Tiingo 공개 지원 종목 목록(키 없음)과 R2의 manifest만 읽는다. 쓰지 않는다. 출력은 건수와 공개 시장 기호·날짜뿐.
+# 필요한 Secrets: R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT, R2_BUCKET (없으면 건너뜀)
+on:
+  workflow_dispatch:
+    inputs:
+      issue: { description: '결과를 댓글로 남길 Issue 번호(선택)', default: '' }
+permissions:
+  contents: read
+  issues: write
+concurrency:
+  group: dl-probe
+  cancel-in-progress: false
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -q -r requirements.txt
+      - name: Probe
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          set -o pipefail
+          python -m quant.dl.probe | tee "$RUNNER_TEMP/card.md"
+          cat "$RUNNER_TEMP/card.md" >> "$GITHUB_STEP_SUMMARY"
+      - name: Comment on the Issue
+        if: inputs.issue != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ inputs.issue }}
+        run: |
+          [[ "$ISSUE" =~ ^[0-9]+$ ]] || { echo "Issue 번호가 아님"; exit 0; }
+          gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/card.md"
