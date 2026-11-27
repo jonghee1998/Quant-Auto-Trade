@@ -103,3 +103,22 @@ def tracking_verdict(tr: dict) -> dict:
     if tr.get("g") is None or tr["n"] < 750 or tr["upper95"] - tr["g"] > 0.005 or tr["g"] > 0.01:
         return {"status": "확인 못 함", "deduct": None}
     return {"status": "확인됨", "deduct": max(0.0, tr["g"])}
+
+
+def price_only(spy_close_raw: pd.Series, fx: pd.Series, fee: float = 0.001) -> pd.Series:
+    """KSPX_P(검산 방법 B): SPY 수정 전 종가 × 원/달러 − 보수. 분배금이 빠진 실제 국내 ETF 종가와 같은 기준."""
+    f = fx.reindex(spy_close_raw.index).ffill()
+    s = spy_close_raw * f
+    return s * _drag(s.index, fee)
+
+
+def tracking_verdict6(main: dict, check: dict | None) -> dict:
+    """계획 #85: 표본 750일 이상, 95% 상한 − g ≤ 0.5%p, 판정 종목 |g| ≤ 1.0%p, 확인용과 부호가 같거나 둘 다 |g| ≤ 0.3%p."""
+    g = main.get("g")
+    if g is None or main["n"] < 750 or main["upper95"] - g > 0.005 or abs(g) > 0.01:
+        return {"status": "확인 못 함", "deduct": None, "why": "표본·신뢰구간·크기"}
+    if check and check.get("g") is not None:
+        gc = check["g"]
+        if not ((g >= 0) == (gc >= 0) or (abs(g) <= 0.003 and abs(gc) <= 0.003)):
+            return {"status": "확인 못 함", "deduct": None, "why": "확인용 종목과 부호 다름"}
+    return {"status": "확인됨", "deduct": max(0.0, g)}

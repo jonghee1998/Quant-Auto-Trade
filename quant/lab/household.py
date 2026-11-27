@@ -62,14 +62,15 @@ class Household:
         return lambda t: 1.0 if t in self.krw else rate
 
     # ---- 매매(그날 종가)
-    def sell(self, b: Book, t: str, krw_amt: float, px, rate, d) -> float:
-        """t를 원화 krw_amt어치(평가액 기준) 판다. 받은 원화(비용·환전·즉시 세금 뺀 뒤) 반환."""
-        if b.q.get(t, 0) <= 0 or krw_amt <= 0:
+    def sell(self, b: Book, t: str, krw_amt: float, px, rate, d, qty: float | None = None, no_fx: bool = False) -> float:
+        """t를 원화 krw_amt어치(평가액 기준, 또는 qty주) 판다. 받은 원화(비용·환전·즉시 세금 뺀 뒤) 반환.
+        no_fx: 달러로 받아 바로 다른 달러 자산을 사는 경우(갈아타기) — 환전 비용 없음(6차, 계획 #85)."""
+        if b.q.get(t, 0) <= 0 or (krw_amt <= 0 and not qty):
             return 0.0
         r = 1.0 if t in self.krw else rate
         p = float(px[t])
-        qty = min(b.q[t], krw_amt / (p * r))
-        net = qty * p * r * (1 - self.c.fee - self.c.slippage) * (1.0 if t in self.krw else 1 - self.c.fx_spread)
+        qty = min(b.q[t], qty if qty else krw_amt / (p * r))
+        net = qty * p * r * (1 - self.c.fee - self.c.slippage) * (1.0 if (t in self.krw or no_fx) else 1 - self.c.fx_spread)
         avg = b.basis[t] / b.q[t]
         gain = net - avg * qty
         b.basis[t] -= avg * qty
@@ -102,11 +103,11 @@ class Household:
         over = max(0.0, b.income_year - TAX["comp_threshold"]) - max(0.0, before - TAX["comp_threshold"])
         return (gain - over) * TAX["domestic"] + over * b.comp_rate
 
-    def buy(self, b: Book, t: str, krw_amt: float, px, rate, d) -> None:
+    def buy(self, b: Book, t: str, krw_amt: float, px, rate, d, no_fx: bool = False) -> None:
         if krw_amt <= 0:
             return
         r = 1.0 if t in self.krw else rate
-        fx = 0.0 if t in self.krw else self.c.fx_spread
+        fx = 0.0 if (t in self.krw or no_fx) else self.c.fx_spread
         spend = min(krw_amt, b.cash)
         if spend <= 0:
             return
@@ -116,6 +117,11 @@ class Household:
         b.basis[t] = b.basis.get(t, 0.0) + spend
         b.cash -= spend
         self.trades.append({"date": d, "book": b.kind, "ticker": t, "side": "buy", "krw": spend})
+
+    def swap(self, b: Book, a: str, c: str, qty: float, px, rate, d) -> None:
+        """달러 자산끼리 갈아타기: a를 qty주 팔아 받은 돈으로 c를 산다. 환전 비용 없음(수수료·호가만)."""
+        got = self.sell(b, a, 0.0, px, rate, d, qty=qty, no_fx=True)
+        self.buy(b, c, got, px, rate, d, no_fx=True)
 
     def rebalance(self, b: Book, target: dict[str, float], px, rate, d) -> None:
         """b의 총액(현금 포함)을 target 비중으로(팔기 먼저, 그다음 현금 안에서 사기)."""
@@ -182,8 +188,9 @@ class Household:
                     self.sell(b, t, min(v, -b.cash * v / H * 1.002), px, rate, d)
         b.income_year = 0.0
 
-    def liquidation(self, b: Book, px, rate, pension_mode: str = "early") -> float:
-        """그날 다 팔고 세금까지 낸 뒤 남는 원화(계좌 종류별)."""
+    def liquidation(self, b: Book, px, rate, pension_mode: str = "early", staged_years: int = 0) -> float:
+        """그날 다 팔고 세금까지 낸 뒤 남는 원화(계좌 종류별).
+        staged_years=N(6차 E-N 결말): 해외 직접 계좌는 가격이 멈춘다고 치고 N년에 나눠 판다 → 남은 이익 중 N × 250만 원 비과세."""
         R = self.R(rate)
         out, gain, imm = b.cash, b.realized_year, 0.0
         for t, q in b.q.items():
@@ -202,7 +209,8 @@ class Household:
                 else:
                     imm += self._domestic_tax(Book("domestic", income_year=b.income_year, comp_rate=b.comp_rate), g)
         if b.kind == "foreign":
-            return out - max(0.0, gain - TAX["deduction"]) * TAX["foreign"] - imm
+            free = TAX["deduction"] * max(1, staged_years)
+            return out - max(0.0, gain - free) * TAX["foreign"] - imm
         if b.kind == "domestic":
             return out - imm
         if b.kind == "isa":
@@ -232,7 +240,7 @@ class Plan:
     lump: float = 0.0
 
 
-PLANS = {"P50": Plan("P50", monthly=500_000.0), "P150": Plan("P150", monthly=1_500_000.0),
+PLANS = {"P50": Plan("P50", monthly=500_000.0), "P150": Plan("P150", monthly=1_500_000.0), "P300": Plan("P300", monthly=3_000_000.0),
          "L1천만": Plan("L1천만", lump=10_000_000.0), "L1억": Plan("L1억", lump=100_000_000.0)}
 
 
@@ -244,6 +252,7 @@ class SimResult:
     taxes: float
     trades: int
     extra: dict
+    endings: dict = field(default_factory=dict)   # 마지막 날 결말별 금액: E0(한꺼번에)·E10·E20(나눠 팔기)
 
 
 def simulate(prices: pd.DataFrame, fx: pd.Series, policy, plan: Plan, start, end, *, costs: Costs5 = Costs5(),
@@ -284,8 +293,10 @@ def simulate(prices: pd.DataFrame, fx: pd.Series, policy, plan: Plan, start, end
         nav.append(sum(b.value(px, R) for b in hh.books.values()))
         liq.append(sum(hh.liquidation(b, px, rate, getattr(policy, "pension_mode", "early")) for b in hh.books.values()))
     taxes = sum(b.taxes for b in hh.books.values())
+    pm = getattr(policy, "pension_mode", "early")
+    endings = {f"E{n}": sum(hh.liquidation(b, px, rate, pm, staged_years=n) for b in hh.books.values()) for n in (0, 10, 20)}
     return SimResult(pd.Series(nav, index=idx), pd.Series(liq, index=idx), pd.Series(flows, index=idx), taxes, len(hh.trades),
-                     getattr(policy, "extra", {}))
+                     getattr(policy, "extra", {}), endings)
 
 
 # ---------------------------------------------------------------- 재는 법(입금이 있을 때)

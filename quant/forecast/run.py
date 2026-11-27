@@ -526,13 +526,99 @@ def _round5(a, conn, prices, fx, mf, sha, out: Path) -> int:
         b = r["cond"].get(r["base"]) or next(iter(r["cond"].values()))
         m = {k: v for k, v in b.items() if not k.startswith("_") and k not in ("declines",)}
         m["conditions"] = {k: {kk: v.get(kk) for kk in ("irr", "struct_share", "mdd_krw", "mdd_usd")} for k, v in r["cond"].items()}
-        reg.add(Experiment(r["id"], r["hypothesis"], {"group": r["group"], "plan": PLAN_ISSUE, "base": r["base"]}, a.period, data_date,
+        reg.add(Experiment(r["id"], r["hypothesis"], {"group": r["group"], "plan": 79, "base": r["base"]}, a.period, data_date,
                            sha, _clean(m), False))
     conn.commit()
     strip(res)
-    md = table5(res, a.period, PLAN_ISSUE, elig, passes, extra)
-    meta = {"plan_issue": PLAN_ISSUE, "round": 5, "code_version": sha, "data_date": data_date, "period": a.period,
+    md = table5(res, a.period, 79, elig, passes, extra)
+    meta = {"plan_issue": 79, "round": 5, "code_version": sha, "data_date": data_date, "period": a.period,
             "tracking_ok": tracking_ok, "deduct": g, "db_distinct_trials": reg.distinct_trials()}
+    (out / f"forecast-{a.period}.md").write_text(md)
+    (out / f"forecast-{a.period}.json").write_text(json.dumps({"meta": meta, **res, "eligibility": elig, "passes": passes, "extra": extra},
+                                                              ensure_ascii=False, default=str, indent=1))
+    print(md)
+    return 0 if any("error" not in r for r in res["rows"]) else 1
+
+
+def load_raw_close(conn, code: str) -> pd.Series:
+    with conn.cursor() as cur:
+        cur.execute("""select p.date, p.close from prices_daily p join instruments i on i.id = p.instrument_id
+                       where i.market = 'US' and i.code = %s order by p.date""", (code,))
+        df = pd.DataFrame(cur.fetchall(), columns=["date", "close"])
+    return df.assign(date=pd.to_datetime(df["date"])).set_index("date")["close"].astype(float)
+
+
+def _round6(a, conn, prices, fx, mf, sha, out: Path) -> int:
+    """6차(계획 #85): 검산(방법 B — 분배금 자료 없음) → H·W·G → 긴 과거 관문(G0) → K1 보고. 모든 표에 '세법 확인 필요'."""
+    from . import synthetic as SYN
+    from .features import asof_series, unrate_signal
+    from .household_bridge import k1_report
+    from .round6 import BENCH6, ROUND6, TAX_NOTE, eligibility6, gl_report6, pass_table6, run_batch6, strip, table6
+    macro = load_macro(conn, ["IR3TIB01KRM156N", "DTB3", "UNRATE"])
+    idx = prices.index
+    kr3m, us3m = asof_series(macro["IR3TIB01KRM156N"], idx), asof_series(macro["DTB3"], idx)
+    div = load_div_yield(conn)
+    syn = SYN.build(prices, fx, kr3m, us3m)
+    syn["KSPX_N"] = SYN.with_us_div_tax(syn["KSPX_U"], div["SPY"] if "SPY" in div else None)
+    # 검산: 분배금 자료(SEIBRO·KRX)를 자동으로 받을 출처를 못 찾음 → 계획의 방법 B(가격끼리: SPY 수정 전 종가 × 환율 − 보수)
+    raw = load_raw_close(conn, "SPY")
+    syn["KSPX_P"] = SYN.price_only(raw, fx).reindex(idx)
+    real = load_kr_sp500(conn)
+    pick = lambda key: next((n for n in real if n.replace(" ", "").startswith(key)), None)  # noqa: E731
+    jn, cn = pick("TIGER미국S&P500"), pick("ACE미국S&P500")
+    win = ("2021-01-04", "2025-12-30")
+    tr_main = SYN.tracking_trend(syn["KSPX_P"], real[jn].loc[win[0]:win[1]]) if jn else {"n": 0, "g": None}
+    tr_chk = SYN.tracking_trend(syn["KSPX_P"], real[cn].loc[win[0]:win[1]]) if cn else None
+    verdict = SYN.tracking_verdict6(tr_main, tr_chk) if jn else {"status": "확인 못 함", "deduct": None, "why": "판정 종목 시세 없음"}
+    tracking_ok = verdict["status"] == "확인됨"
+    if (verdict.get("deduct") or 0) > 0:
+        syn["KSPX_N"] = SYN.haircut(syn["KSPX_N"], verdict["deduct"])
+    print(f"검산(방법 B, {jn} / 확인 {cn}): {verdict}", flush=True)
+    px = prices.join(syn)
+    unrate = unrate_signal(macro.get("UNRATE"), idx)
+    ctx = {"spy": prices["SPY"], "unrate": unrate}
+    # G0 관문(긴 과거, 달러·세금 0·비용 포함)
+    gate = {"status": "확인 못 함(VFINX 없음)", "pass": False}
+    if "VFINX" in px:
+        vf = px[["VFINX"]].rename(columns={"VFINX": "SPY"}).copy()
+        vf["SHY"] = (1 + us3m.reindex(idx).ffill().fillna(0) / 100 / 252).cumprod() * 100
+        gate = gl_report6(vf, unrate)
+    print(f"R6_G0 관문: {gate.get('less')}/{gate.get('n')} 덜 빠짐, 1980~2003 {gate.get('cagr_80_03')} vs {gate.get('hold_80_03')} → {gate.get('pass')}", flush=True)
+    ids = {s.strip() for s in a.ids.split(",") if s.strip()}
+    exps = [e for e in ROUND6 if not ids or e.id in ids]
+    res = run_batch6(px, fx, div, ctx, exps, BENCH6, period=a.period, log=lambda s: print(s, flush=True))
+    extra = {"검산(방법 B·차이만)": {"judge": jn, "check": cn, "window": win,
+                                "main": {k: v for k, v in tr_main.items() if k in ("n", "g", "upper95")},
+                                "check_g": None if not tr_chk else {k: v for k, v in tr_chk.items() if k in ("n", "g", "upper95")},
+                                "verdict": verdict, "note": "분배금 자료 자동 수집 출처 없음 → 계획의 방법 B"},
+             "R6_G0 관문": {k: v for k, v in gate.items() if k != "episodes"},
+             "R6_G0 하락 목록": gate.get("episodes")}
+    elig = passes = None
+    if a.period == "dev":
+        elig = eligibility6(res, px, fx, div, ctx, tracking_ok, gate)
+        if jn:
+            extra["R6_K1(보고·차이만)"] = k1_report(px, fx, div, real[jn], syn["KSPX_P"])
+    else:
+        passes = pass_table6(res)
+    reg = DbRegistry(conn)
+    data_date = str(prices.index[-1].date())
+    for r in res["rows"]:
+        if r["benchmark"] or "error" in r:
+            continue
+        b = r["cond"][r["base"]]
+        m = {k: v for k, v in b.items() if not k.startswith("_") and k not in ("valid_dd",)}
+        m["conditions"] = {k: {kk: v.get(kk) for kk in ("irr", "irr_E0", "struct_share", "judge_share")} for k, v in r["cond"].items()}
+        reg.add(Experiment(r["id"], r["hypothesis"], {"group": r["group"], "plan": PLAN_ISSUE, "base": r["base"]}, a.period, data_date,
+                           sha, _clean(m), False))
+    for gid in ("R6_G0", "R6_K1"):  # 보고용도 시도 수에 넣는다(계획 #85)
+        if not ids or gid in ids:
+            reg.add(Experiment(gid, "보고 전용", {"group": "보고", "plan": PLAN_ISSUE}, a.period, data_date, sha,
+                               _clean({"gate_pass": gate.get("pass"), "less": gate.get("less"), "n": gate.get("n")}), False))
+    conn.commit()
+    strip(res)
+    md = table6(res, a.period, PLAN_ISSUE, elig, passes, extra)
+    meta = {"plan_issue": PLAN_ISSUE, "round": 6, "code_version": sha, "data_date": data_date, "period": a.period, "tax_note": TAX_NOTE,
+            "tracking_ok": tracking_ok, "db_distinct_trials": reg.distinct_trials()}
     (out / f"forecast-{a.period}.md").write_text(md)
     (out / f"forecast-{a.period}.json").write_text(json.dumps({"meta": meta, **res, "eligibility": elig, "passes": passes, "extra": extra},
                                                               ensure_ascii=False, default=str, indent=1))
@@ -545,7 +631,7 @@ def main() -> int:
     ap.add_argument("--period", choices=["dev", "valid"], default="dev")
     ap.add_argument("--ids", default="", help="쉼표로 고르기(빈칸=2차 11개 전부, 기준선은 늘 같이)")
     ap.add_argument("--out", default="lab-out")
-    ap.add_argument("--round", type=int, choices=[1, 2, 3, 4, 5], default=5)
+    ap.add_argument("--round", type=int, choices=[1, 2, 3, 4, 5, 6], default=6)
     a = ap.parse_args()
     url = os.environ.get("DATABASE_URL")
     if not url:
@@ -567,6 +653,8 @@ def main() -> int:
             return _round4(a, conn, prices, fx, mf, sha, out)
         if a.round == 5:
             return _round5(a, conn, prices, fx, mf, sha, out)
+        if a.round == 6:
+            return _round6(a, conn, prices, fx, mf, sha, out)
         div = load_div_yield(conn)
         pick = {s.strip() for s in a.ids.split(",") if s.strip()}
         exps = [e for e in ROUND2 if not pick or e.id in pick]
