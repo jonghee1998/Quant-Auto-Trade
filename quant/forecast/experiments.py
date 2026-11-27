@@ -14,8 +14,8 @@ from .rules import (SECTORS, Banded, BandedMix, FixedMix, GrowthTrend, HarvestOv
 from .strategy import ForecastRanker, MarketTimer
 
 # 이 실험 묶음을 설계한 Fable 계획 Issue 번호(라벨 lab:fable-plan). lab-forecast는 이게 없으면 돌지 않는다.
-# 1차(30개)는 Fable 설계 없이 만들어졌다(실수). 2차(ROUND2)는 Fable 설계 #59, 3차(ROUND3)는 #66 그대로.
-PLAN_ISSUE: int | None = 66
+# 1차(30개)는 Fable 설계 없이 만들어졌다(실수). 2차(ROUND2) #59, 3차(ROUND3) #66, 4차(ROUND4) #73 그대로.
+PLAN_ISSUE: int | None = 73
 
 UNIVERSE = ["SPY", "QQQ", "IWM", "DIA", "XLK", "XLF", "XLE", "XLV", "XLY", "XLP", "XLI", "XLU", "XLB", "XLRE", "XLC",
             "SOXX", "EFA", "EEM", "EWJ", "VGK", "EWY", "EWT", "EWZ", "MCHI", "INDA", "TLT", "IEF", "GLD", "VNQ"]
@@ -192,6 +192,54 @@ BENCHMARKS3: list[Exp] = [
     Exp("B80", "기준선", "SPY 80%·SHY 20%(해마다 맞춤)", lambda px, mf: FixedMix("B80", {"SPY": 0.8, "SHY": 0.2}), "M"),
     Exp("B60", "기준선", "SPY 60%·SHY 40%(해마다 맞춤)", lambda px, mf: FixedMix("B60", {"SPY": 0.6, "SHY": 0.4}), "M"),
 ]
-PREV_TRIALS = 48   # 3차 전까지 누적 시도(계획 #66: 1차 30 + 7 + 2차 11) → 개발 DSR 시도 수 = 48 + 10 = 58 (DB 값이 크면 그쪽)
-EXPERIMENTS = ROUND3   # 기본 실행 대상
+PREV_TRIALS_R3 = 48   # 3차 전까지 누적 시도(계획 #66: 1차 30 + 7 + 2차 11) → 개발 DSR 시도 수 = 48 + 10 = 58 (DB 값이 크면 그쪽)
 assert len(ROUND3) == 10 and len({e.id for e in ROUND3 + BENCHMARKS3}) == 13
+
+# ── 4차(Fable 설계 #73) ── 맞히지 않고 확실히 얻는 것(절세 매도·계좌 세율) + 원화 투자자의 환헤지 갈아타기.
+# params: account = foreign(해외 직접) / deferred(절세계좌형) / domestic(국내 일반), period = dev(2004~) / fx(1999~)
+from .rules import FxHedgeTrend, FxHedgeValue, MixHarvest  # noqa: E402
+from quant.lab.strategy import BuyAndHold  # noqa: E402
+
+
+def _fx(mf):
+    return mf["fx_lag"]
+
+
+ROUND4: list[Exp] = [
+    Exp("R4_H1", "H", "절세 매도는 계좌가 작을수록 이득이 커서 IVV 보유 대비 1천만 +0.30%p·3천만 +0.15%p·5천만 +0.10%p·1억 > 0",
+        lambda px, mf: TaxHarvest("R4_H1"), "M", {"account": "foreign"}),
+    Exp("R4_C1", "C", "S&P 90 : 달러 단기채 10 + 절세 매도는 S&P −0.3%p 이내, 최악 손실 ≤ S&P×0.85",
+        lambda px, mf: MixHarvest("R4_C1", eq=0.9), "M", {"account": "foreign"}),
+    Exp("R4_C2", "C", "같은 규칙 80:20은 C1보다 손실이 작고 절세 매도 덕에 B80보다 연수익이 높다",
+        lambda px, mf: MixHarvest("R4_C2", eq=0.8), "M", {"account": "foreign"}),
+    Exp("R4_I1", "I", "절세계좌형에서 국내 상장 S&P를 그냥 들면 해외 직접 S&P보다 청산 세후 0.5%p 이상 높다",
+        lambda px, mf: BuyAndHold("KSPX_U"), "M", {"account": "deferred"}),
+    Exp("R4_I2", "I", "절세계좌형 90:10은 해외 직접 S&P보다 연수익이 같거나 높고 최악 손실이 작다",
+        lambda px, mf: BandedMix("R4_I2", {"KSPX_U": 0.9, "KUST_U": 0.1}), "M", {"account": "deferred"}),
+    Exp("R4_I3", "I", "절세계좌형 80:20은 해외 직접 S&P −0.3%p 이내, 최악 손실 ≤ S&P×0.85",
+        lambda px, mf: BandedMix("R4_I3", {"KSPX_U": 0.8, "KUST_U": 0.2}), "M", {"account": "deferred"}),
+    Exp("R4_F1", "F", "원/달러가 200일 평균 아래로 내리는 추세일 때만 환헤지하면 같은 헤지 비율 고정 혼합보다 연 0.5%p 이상 높다",
+        lambda px, mf: FxHedgeTrend("R4_F1", _fx(mf), window=200), "M", {"account": "deferred", "period": "fx"}),
+    Exp("R4_F1a", "F", "(고원) F1을 100일 평균으로", lambda px, mf: FxHedgeTrend("R4_F1a", _fx(mf), window=100), "M",
+        {"account": "deferred", "period": "fx", "neighbor_of": "R4_F1"}),
+    Exp("R4_F1b", "F", "(고원) F1을 300일 평균으로", lambda px, mf: FxHedgeTrend("R4_F1b", _fx(mf), window=300), "M",
+        {"account": "deferred", "period": "fx", "neighbor_of": "R4_F1"}),
+    Exp("R4_F2", "F", "달러가 비싸졌다가 꺾인 뒤에만 헤지하면 같은 헤지 비율 고정 혼합보다 연 0.5%p 이상 높다",
+        lambda px, mf: FxHedgeValue("R4_F2", _fx(mf), window=756), "M", {"account": "deferred", "period": "fx"}),
+    Exp("R4_F2a", "F", "(고원) F2를 504일 평균으로", lambda px, mf: FxHedgeValue("R4_F2a", _fx(mf), window=504), "M",
+        {"account": "deferred", "period": "fx", "neighbor_of": "R4_F2"}),
+    Exp("R4_F2b", "F", "(고원) F2를 1260일 평균으로", lambda px, mf: FxHedgeValue("R4_F2b", _fx(mf), window=1260), "M",
+        {"account": "deferred", "period": "fx", "neighbor_of": "R4_F2"}),
+]
+BENCHMARKS4: list[Exp] = [
+    Exp("BIV", "기준선", "IVV 그냥 보유", lambda px, mf: FixedMix("BIV", {"IVV": 1.0}), "M", {"account": "foreign"}),
+    Exp("B90", "기준선", "SPY 90·SHY 10(해마다)", lambda px, mf: FixedMix("B90", {"SPY": 0.9, "SHY": 0.1}), "M", {"account": "foreign"}),
+    Exp("B80", "기준선", "SPY 80·SHY 20(해마다)", lambda px, mf: FixedMix("B80", {"SPY": 0.8, "SHY": 0.2}), "M", {"account": "foreign"}),
+    Exp("B70", "기준선", "SPY 70·SHY 30(해마다)", lambda px, mf: FixedMix("B70", {"SPY": 0.7, "SHY": 0.3}), "M", {"account": "foreign"}),
+    Exp("BW80", "기준선", "SPY 80·원화 현금 20(해마다)", lambda px, mf: FixedMix("BW80", {"SPY": 0.8, "KRWCASH": 0.2}), "M", {"account": "foreign"}),
+    Exp("BKR", "기준선", "국내 일반계좌 KSPX_U 보유", lambda px, mf: BuyAndHold("KSPX_U"), "M", {"account": "domestic"}),
+    Exp("BKH", "기준선", "절세계좌형 항상 헤지", lambda px, mf: BuyAndHold("KSPX_H"), "M", {"account": "deferred"}),
+]
+PREV_TRIALS = 58   # 4차 전까지 누적 서로 다른 전략(계획 #73) → 개발 시도 수 = max(DB, 58 + 12 = 70)
+EXPERIMENTS = ROUND4   # 기본 실행 대상
+assert len(ROUND4) == 12 and len({e.id for e in ROUND4 + BENCHMARKS4}) == 19

@@ -18,7 +18,7 @@ from quant.lab.metrics import (alpha_sharpe, beta_adjusted_alpha, cagr, deflated
 from quant.lab.splits import CRASH_2008, DEFAULT_SPLITS, VALID_DRAWDOWNS
 from quant.lab.strategy import BuyAndHold
 
-from .experiments import PREV_TRIALS, ROUND3, Exp
+from .experiments import PREV_TRIALS_R3 as PREV_TRIALS, ROUND3, Exp
 
 CONDITIONS = [(100_000_000.0, 1.0), (10_000_000.0, 1.0), (100_000_000.0, 2.0), (10_000_000.0, 2.0)]
 BASE = CONDITIONS[0]

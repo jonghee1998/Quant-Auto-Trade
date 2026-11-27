@@ -397,3 +397,111 @@ class HarvestOverlay:
         tot = sum(v for v in vals.values() if v > 0)
         scale = min(1.0, V / tot) if tot > 0 else 1.0
         return {t: v * scale / V for t, v in vals.items() if v > 1e-6}
+
+
+# ── 4차(Fable 설계 #73): 고정 혼합 + 절세 매도, 환헤지 갈아타기 ──
+
+class MixHarvest:
+    """R4_C1·C2: 주식(SPY+IVV) eq·SHY 1−eq. 11월 마지막 거래일(월말 호출)에만 보고, 한 자산이 5%p 넘게 벗어나면 맞춘 뒤
+    남은 공제로 절세 매도(SPY↔IVV). 주식 몫 안의 SPY·IVV 비율은 맞출 때 그대로 둔다."""
+    wants_state = True
+
+    def __init__(self, name: str, eq: float, band: float = 0.05, month: int = 11, deduction: float = 2_500_000.0):
+        self.name, self.eq, self.band, self.month, self.deduction, self.started = name, eq, band, month, deduction, False
+        self.harvests: list[tuple[pd.Timestamp, str, float]] = []
+
+    def weights(self, as_of, history, state):
+        if not self.started:
+            self.started = True
+            return alloc(self.eq, False)
+        if as_of.month != self.month or state["value"] <= 0:
+            return None
+        V, pos = state["value"], state["positions"]
+        vals = {t: p["value"] for t, p in pos.items()}
+        ratio = {t: _gain_ratio(p) for t, p in pos.items()}
+        realized, changed = state["realized"], False
+        eq_now = vals.get("SPY", 0.0) + vals.get("IVV", 0.0)
+        if abs(eq_now / V - self.eq) > self.band or abs(vals.get("SHY", 0.0) / V - (1 - self.eq)) > self.band:
+            k = self.eq * V / eq_now if eq_now > 0 else 0.0
+            for t in ("SPY", "IVV"):
+                if vals.get(t, 0) > 0:
+                    if k < 1:  # 줄이는 만큼 이익이 실현된다
+                        g = ratio.get(t, 0.0)
+                        realized += vals[t] * (1 - k) * g / (1 + g) if g > -1 else 0.0
+                    vals[t] *= k
+            if eq_now <= 0:
+                vals["SPY"] = self.eq * V
+            vals["SHY"] = (1 - self.eq) * V
+            changed = True
+        if _has_today(history, "IVV"):
+            mv = harvest_move(vals, ratio, realized, deduction=self.deduction)
+            if mv is not None:
+                a, b, amt = mv
+                vals[a] -= amt
+                vals[b] = vals.get(b, 0.0) + amt
+                self.harvests.append((as_of, a, amt))
+                changed = True
+        if not changed:
+            return None
+        den = max(V, sum(v for v in vals.values() if v > 0))
+        return {t: v / den for t, v in vals.items() if v > 1e-6}
+
+
+class _FxSwitch:
+    """환노출(KSPX_U) ↔ 환헤지(KSPX_H) 갈아타기 공통. fx_lag: 원/달러를 하루 미룬 것(전 영업일까지의 값)."""
+
+    def __init__(self, name: str, fx_lag: pd.Series):
+        self.name, self.fx, self.hedged, self.last = name, fx_lag, False, None
+        self.switches = 0
+        self.hedge_days: list[tuple[pd.Timestamp, bool]] = []
+
+    def decide(self, s: pd.Series) -> None:  # 하위 클래스가 self.hedged를 바꾼다
+        raise NotImplementedError
+
+    def weights(self, as_of, history):
+        s = self.fx.loc[:as_of].dropna()
+        if "KSPX_H" not in history or pd.isna(history["KSPX_H"].iloc[-1]):
+            self.hedged = False
+        else:
+            self.decide(s)
+        self.hedge_days.append((as_of, self.hedged))
+        if self.last is not None and self.hedged == self.last:
+            return None
+        if self.last is not None:
+            self.switches += 1
+        self.last = self.hedged
+        return {"KSPX_H": 1.0} if self.hedged else {"KSPX_U": 1.0}
+
+
+class FxHedgeTrend(_FxSwitch):
+    """R4_F1(·a·b): 원/달러 ÷ n일 평균 < 0.98 → 헤지, > 1.02 → 환노출, 사이는 유지. 시작은 환노출. 월말 1회."""
+
+    def __init__(self, name: str, fx_lag: pd.Series, window: int = 200, band: float = 0.02):
+        super().__init__(name, fx_lag)
+        self.window, self.band = window, band
+
+    def decide(self, s):
+        if len(s) < self.window:
+            return
+        ratio = float(s.iloc[-1] / s.iloc[-self.window:].mean())
+        if ratio < 1 - self.band:
+            self.hedged = True
+        elif ratio > 1 + self.band:
+            self.hedged = False
+
+
+class FxHedgeValue(_FxSwitch):
+    """R4_F2(·a·b): z = 원/달러 ÷ n일 평균. z ≥ 1.08 이고 환율 < 60일 평균 → 헤지, z ≤ 1.00 → 환노출, 사이는 유지."""
+
+    def __init__(self, name: str, fx_lag: pd.Series, window: int = 756, hi: float = 1.08, lo: float = 1.00, short: int = 60):
+        super().__init__(name, fx_lag)
+        self.window, self.hi, self.lo, self.short = window, hi, lo, short
+
+    def decide(self, s):
+        if len(s) < self.window:
+            return
+        z = float(s.iloc[-1] / s.iloc[-self.window:].mean())
+        if z >= self.hi and s.iloc[-1] < s.iloc[-self.short:].mean():
+            self.hedged = True
+        elif z <= self.lo:
+            self.hedged = False
