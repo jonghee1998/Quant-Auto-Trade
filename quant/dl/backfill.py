@@ -52,10 +52,13 @@ def run(r2: R2, fetch, token: str, n: int = 200, batch: int = 40, log=print) -> 
     r2.put("members.csv", ("ticker,start_date,end_date\n" + "\n".join(f"{s.ticker},{s.start},{s.end or ''}" for s in spells)).encode())
     sample = M.sample(spells, n)
     manifest = r2.get_json("manifest.json", {}) or {}
+    # 기호의 점 때문에 404로 '없음'이 된 것은 다시 받는다(BRK.B → BRK-B)
+    for t in [t for t in sample if t in manifest and "." in t and not manifest[t].get("rows")]:
+        manifest.pop(t)
     todo = [t for t in sample if t not in manifest][:batch]
     for t in todo:
         try:
-            rows = S.tiingo_daily(fetch, t, START, END, token)
+            rows = S.tiingo_daily(fetch, t.replace(".", "-"), START, END, token)  # Tiingo는 BRK.B를 BRK-B로 쓴다
         except HttpError as e:
             msg = str(e)
             if "HTTP 429" in msg or "연결 실패" in msg or "재시도 초과" in msg or "HTTP 5" in msg:
