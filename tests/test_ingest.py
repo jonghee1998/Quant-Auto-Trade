@@ -50,14 +50,20 @@ def test_fred_skips_missing_and_keeps_release_date():
     assert "output_type" not in g.calls[0][1]  # 빈티지 수천 개 → FRED 400 방지
 
 
-def test_fred_without_vintage_history_uses_conservative_lag():
-    # 빈티지가 없으면 realtime_start가 수년 뒤 → 실제 발표일로 믿지 않는다(미래 데이터 방지)
+def test_fred_before_vintage_history_is_unknown_until_recorded():
+    # 발표 기록 시작 전 값(realtime_start가 수년 뒤)은 그날 전엔 몰랐던 값 — 기준일+35일로 바꿔 넣으면
+    # 나중에 다시 계산된 값이 당시 값처럼 들어간다(Fable 판정 #57의 누수)
     f = FakeFetch((200, {"observations": [{"date": "2010-03-01", "realtime_start": "2019-06-01", "value": "1"},
-                                          {"date": "2010-03-01", "realtime_start": "2010-04-02", "value": "2"}]}))
-    weekly = S.fred_series(f, "NFCI", date(2010, 1, 1), "FAKE")
-    assert weekly[0]["release_date"] == "2010-04-05" and weekly[1]["release_date"] == "2010-04-02"
-    f2 = FakeFetch((200, {"observations": [{"date": "2010-03-01", "realtime_start": "2019-06-01", "value": "1"}]}))
-    assert S.fred_series(f2, "CPIAUCSL", date(2010, 1, 1), "FAKE")[0]["release_date"] == "2010-04-05"
+                                          {"date": "2010-04-01", "realtime_start": "2010-05-07", "value": "2"}]}))
+    rows = S.fred_series(f, "NFCI", date(2010, 1, 1), "FAKE")
+    assert [r["release_date"] for r in rows] == ["2019-06-01", "2010-05-07"]
+    bad = FakeFetch((200, {"observations": [{"date": "2010-03-01", "realtime_start": "2010-02-01", "value": "1"}]}))
+    assert S.fred_series(bad, "CPIAUCSL", date(2010, 1, 1), "FAKE")[0]["release_date"] == "2010-04-05"  # 기록 이상 → 보수적
+
+
+def test_fred_weekly_published_daily_series_lag_seven_days():
+    f = FakeFetch((200, {"observations": [{"date": "2024-01-02", "realtime_start": "2026-11-26", "value": "120"}]}))
+    assert S.fred_series(f, "DTWEXBGS", date(2024, 1, 1), "FAKE")[0]["release_date"] == "2024-01-09"
 
 
 def _kr_page(items, total):
