@@ -82,7 +82,7 @@ def test_weekly_rebalance_is_last_day_of_each_week():
 
 
 def test_all_thirty_experiments_build():
-    from quant.forecast.experiments import EXPERIMENTS, UNIVERSE
+    from quant.forecast.experiments import ROUND1 as EXPERIMENTS, UNIVERSE
     rng = np.random.default_rng(3)
     idx = pd.bdate_range("2010-01-04", periods=400)
     cols = UNIVERSE + ["SHY"]

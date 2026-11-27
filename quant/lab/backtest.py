@@ -5,6 +5,9 @@
 - 세금: 해외주식 양도소득세. 매도 차익(원화, 평균단가)을 연 단위로 합산해 공제 후 세율을 곱해 그해 마지막 거래일에 낸다.
   결손금 이월은 없다. 끝까지 들고 있는 종목의 세금은 `after_tax_if_liquidated` 로 따로 보여 준다.
 - 소수 주식을 허용한다(비중 재현을 우선).
+- 2차(Fable 판정 #57·설계 #59): 슬리피지(편도), 비용 배수, 같은 날 팔고 사는 달러는 순액만 환전,
+  배당세 15%(배당락일 배당률 × 보유액), 연말 세금으로 현금이 모자라면 보유분을 비례로 팔아 냄,
+  전략이 None을 주면 '그대로 둠'(매매 없음), 날짜별 비중 기록.
 """
 from __future__ import annotations
 
@@ -22,6 +25,12 @@ class Costs:
     fx_spread: float = 0.001     # 편도 환전 스프레드율
     tax_rate: float = 0.22       # 해외주식 양도소득세(지방세 포함)
     tax_deduction_krw: float = 2_500_000.0  # 연 기본공제(원)
+    slippage: float = 0.0003     # 편도 호가 차이(체결 금액 대비)
+    dividend_tax: float = 0.15   # 미국 배당 원천징수
+
+    def scaled(self, k: float) -> "Costs":
+        """비용 k배(수수료·환전·슬리피지). 세금은 그대로."""
+        return Costs(self.fee * k, self.fx_spread * k, self.tax_rate, self.tax_deduction_krw, self.slippage * k, self.dividend_tax)
 
 
 @dataclass
@@ -30,6 +39,8 @@ class BacktestResult:
     trades: list[dict] = field(default_factory=list)
     taxes: dict[int, float] = field(default_factory=dict)
     after_tax_if_liquidated: float = float("nan")
+    weights: pd.DataFrame | None = None  # 날짜별 종가 기준 보유 비중(현금 제외)
+    dividend_taxes: float = 0.0
 
 
 def _check_inputs(prices: pd.DataFrame, fx: pd.Series) -> pd.Series:
@@ -63,8 +74,10 @@ def run_backtest(
     capital_krw: float = 10_000_000.0,
     rebalance: str = "M",
     costs: Costs = Costs(),
+    div_yield: pd.DataFrame | None = None,
 ) -> BacktestResult:
-    """start~end 구간을 돌린다. 신호 계산에는 start 이전 가격도 history 로 쓸 수 있다."""
+    """start~end 구간을 돌린다. 신호 계산에는 start 이전 가격도 history 로 쓸 수 있다.
+    div_yield: 날짜×종목 배당률(배당락일에만 값). 수정종가가 배당을 이미 담고 있으므로 세금만 현금에서 뺀다."""
     fx = _check_inputs(prices, fx)
     mask = prices.index >= pd.Timestamp(start)
     if end is not None:
@@ -84,13 +97,26 @@ def run_backtest(
     # 첫날에도 신호를 내 다음 날부터 보유한다(첫날은 현금).
     first_signal = True
 
+    trade_cost = costs.fee + costs.slippage
+    div_tax_total = 0.0
+    wrows = []
     for i, d in enumerate(idx):
         px = prices.loc[d]
         rate = float(fx.loc[d])
+        # 배당세: 배당락일에 그 전날 종가 보유액 × 배당률 × 세율(원화)
+        if div_yield is not None and shares and i > 0 and d in div_yield.index:
+            prev = prices.loc[idx[i - 1]]
+            for t, q in shares.items():
+                y = div_yield.at[d, t] if t in div_yield.columns else 0.0
+                if y and y > 0:
+                    tax = q * float(prev[t]) * rate * y * costs.dividend_tax
+                    cash -= tax
+                    div_tax_total += tax
         if pending is not None:
             value = cash + sum(q * float(px[t]) * rate for t, q in shares.items())
             target_val = {t: w * value for t, w in pending.items() if w > 0}
-            # 1) 팔기: 목표보다 많이 가진 만큼
+            usd_sold = usd_bought = 0.0
+            # 1) 팔기: 목표보다 많이 가진 만큼(환전 전 달러로 받는다)
             for t in sorted(set(shares) | set(target_val)):
                 p = float(px[t]) if t in px.index else np.nan
                 if np.isnan(p):
@@ -99,8 +125,9 @@ def run_backtest(
                 diff = target_val.get(t, 0.0) - cur_val
                 if diff < -1e-9 and shares.get(t, 0.0) > 0:
                     qty = min(shares[t], -diff / (p * rate))
-                    gross = qty * p * rate
-                    net = gross * (1 - costs.fee) * (1 - costs.fx_spread)
+                    usd = qty * p * (1 - trade_cost)
+                    usd_sold += usd
+                    net = usd * rate
                     avg = basis[t] / shares[t]
                     realized_year += net - avg * qty
                     basis[t] -= avg * qty
@@ -116,19 +143,24 @@ def run_backtest(
                 cur_val = shares.get(t, 0.0) * p * rate
                 if tv - cur_val > 1e-9:
                     buys[t] = tv - cur_val
-            need = sum(v * (1 + costs.fee) * (1 + costs.fx_spread) for v in buys.values())
+            # 환전은 순액만: 판 달러로 먼저 사고 모자란 만큼만 원화→달러(반대면 남은 달러만 원화로)
+            gross_buy = sum(v * (1 + trade_cost) for v in buys.values())
+            fx_need = max(0.0, gross_buy - usd_sold * rate) * costs.fx_spread + max(0.0, usd_sold * rate - gross_buy) * costs.fx_spread
+            need = gross_buy + fx_need
             scale = min(1.0, cash / need) if need > 0 else 0.0
             for t, v in buys.items():
                 p = float(px[t])
-                spend = v * scale * (1 + costs.fee) * (1 + costs.fx_spread)
+                spend = v * scale * (1 + trade_cost)
                 qty = v * scale / (p * rate)
+                usd_bought += qty * p
                 shares[t] = shares.get(t, 0.0) + qty
                 basis[t] = basis.get(t, 0.0) + spend
                 cash -= spend
                 trades.append({"date": d, "ticker": t, "side": "buy", "qty": qty, "krw": spend})
+            cash -= abs(usd_bought - usd_sold) * rate * costs.fx_spread
             pending = None
 
-        # 연말 세금
+        # 연말 세금(현금이 모자라면 보유분을 비례로 팔아 낸다)
         last_of_year = i == len(idx) - 1 or idx[i + 1].year != d.year
         if last_of_year and i < len(idx) - 1:
             tax = max(0.0, realized_year - costs.tax_deduction_krw) * costs.tax_rate
@@ -136,13 +168,29 @@ def run_backtest(
                 cash -= tax
                 taxes[d.year] = taxes.get(d.year, 0.0) + tax
             realized_year = 0.0
+            if cash < 0 and shares:
+                hold = sum(q * float(px[t]) * rate for t, q in shares.items())
+                frac = min(1.0, -cash / (hold * (1 - trade_cost) * (1 - costs.fx_spread)))
+                for t in list(shares):
+                    qty = shares[t] * frac
+                    net = qty * float(px[t]) * rate * (1 - trade_cost) * (1 - costs.fx_spread)
+                    avg = basis[t] / shares[t]
+                    realized_year += net - avg * qty  # 다음 해 실현분으로
+                    basis[t] -= avg * qty
+                    shares[t] -= qty
+                    cash += net
+                    trades.append({"date": d, "ticker": t, "side": "sell", "qty": qty, "krw": net, "why": "세금"})
 
         value = cash + sum(q * float(px[t]) * rate for t, q in shares.items())
         nav.append(value)
+        wrows.append({t: q * float(px[t]) * rate / value for t, q in shares.items()} if value > 0 else {})
 
         if i < len(idx) - 1 and (first_signal or d in rebal):
             history = prices.loc[:d]
-            w = {t: float(v) for t, v in dict(strategy.weights(d, history)).items() if v and float(v) > 0}
+            raw = strategy.weights(d, history)
+            if raw is None and not first_signal:  # 그대로 둠(띠 안·변화 없음)
+                continue
+            w = {t: float(v) for t, v in dict(raw or {}).items() if v and float(v) > 0}
             total = sum(w.values())
             if total > 1 + 1e-9:
                 raise ValueError(f"{strategy.name}: 비중 합이 1을 넘는다 ({total:.4f})")
@@ -156,8 +204,9 @@ def run_backtest(
     liq_gain = realized_year
     liq_cash = cash
     for t, q in shares.items():
-        net = q * float(px[t]) * rate * (1 - costs.fee) * (1 - costs.fx_spread)
+        net = q * float(px[t]) * rate * (1 - trade_cost) * (1 - costs.fx_spread)
         liq_gain += net - basis[t]
         liq_cash += net
     liq_tax = max(0.0, liq_gain - costs.tax_deduction_krw) * costs.tax_rate
-    return BacktestResult(pd.Series(nav, index=idx, name=strategy.name), trades, taxes, liq_cash - liq_tax)
+    wdf = pd.DataFrame(wrows, index=idx).fillna(0.0)
+    return BacktestResult(pd.Series(nav, index=idx, name=strategy.name), trades, taxes, liq_cash - liq_tax, wdf, div_tax_total)

@@ -31,6 +31,26 @@ def load_prices(conn) -> tuple[pd.DataFrame, pd.Series]:
     return prices, fxs
 
 
+def div_yield_from_factors(df: pd.DataFrame, max_jump: float = 0.05) -> pd.DataFrame:
+    """(code, date, adj_factor) → 날짜×종목 배당률. 수정계수(수정종가÷종가)가 하루에 r만큼 오르면 그날이 배당락(배당률 r).
+    하루 조정폭이 max_jump를 넘으면 분할 등으로 보고 버린다(계획 #59). 배당이 없는 날은 칸이 비어 있다."""
+    if df.empty:
+        return pd.DataFrame()
+    f = df.pivot(index="date", columns="code", values="adj_factor").sort_index()
+    f.index = pd.to_datetime(f.index)
+    r = f / f.shift(1) - 1
+    return r.where((r > 1e-6) & (r <= max_jump)).dropna(how="all")
+
+
+def load_div_yield(conn) -> pd.DataFrame:
+    with conn.cursor() as cur:
+        cur.execute("""select i.code, p.date, p.adj_factor from prices_daily p join instruments i on i.id = p.instrument_id
+                       where i.market = 'US' and p.adj_factor is not null""")
+        df = pd.DataFrame(cur.fetchall(), columns=["code", "date", "adj_factor"])
+    df["adj_factor"] = df["adj_factor"].astype(float)
+    return div_yield_from_factors(df)
+
+
 def card(name: str, period: str, m: dict) -> str:
     def p(v, d=1):
         return "—" if v is None or v != v else f"{v * 100:+.{d}f}%"

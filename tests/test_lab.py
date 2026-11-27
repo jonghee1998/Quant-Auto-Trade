@@ -12,7 +12,7 @@ from quant.lab.run import evaluate
 from quant.lab.splits import HoldoutLocked, Splits
 from quant.lab.strategy import BuyAndHold, TrendFilter
 
-NO_COST = Costs(fee=0.0, fx_spread=0.0, tax_rate=0.0, tax_deduction_krw=0.0)
+NO_COST = Costs(fee=0.0, fx_spread=0.0, tax_rate=0.0, tax_deduction_krw=0.0, slippage=0.0)
 
 
 def _prices(n=300, start="2020-01-01", growth=0.001, ticker="TEST01"):
@@ -69,7 +69,7 @@ def test_yearly_tax_on_realized_gain_after_deduction():
         def weights(self, as_of, history):
             return {"TEST01": 1.0} if as_of < pd.Timestamp("2021-12-15") else {}
 
-    c = Costs(fee=0.0, fx_spread=0.0, tax_rate=0.22, tax_deduction_krw=2_500_000)
+    c = Costs(fee=0.0, fx_spread=0.0, tax_rate=0.22, tax_deduction_krw=2_500_000, slippage=0.0)
     res = run_backtest(p, _fx(p), InThenOut(), idx[0], capital_krw=10_000_000, costs=c, rebalance="D")
     gain = 10_000_000  # 100 → 200 으로 두 배
     assert res.taxes[2021] == pytest.approx((gain - 2_500_000) * 0.22)
@@ -78,7 +78,7 @@ def test_yearly_tax_on_realized_gain_after_deduction():
 
 def test_unrealized_gain_is_taxed_only_in_liquidation_view():
     p = _prices(n=600)
-    c = Costs(fee=0.0, fx_spread=0.0, tax_rate=0.22, tax_deduction_krw=2_500_000)
+    c = Costs(fee=0.0, fx_spread=0.0, tax_rate=0.22, tax_deduction_krw=2_500_000, slippage=0.0)
     res = run_backtest(p, _fx(p), BuyAndHold("TEST01"), p.index[0], costs=c)
     assert res.taxes == {}
     gain = res.nav.iloc[-1] - 10_000_000
@@ -136,3 +136,71 @@ def test_registry_rejects_second_final(tmp_path):
     reg.add(e)
     with pytest.raises(PermissionError):
         reg.add(e)
+
+
+# ---- 2차 측정 도구(Fable 판정 #57·설계 #59)
+
+def test_net_fx_when_switching_same_day():
+    """같은 날 팔고 사면 달러는 순액만 환전: SPY→SHY 전환 비용 = 수수료 양쪽 + 환전 0(순액 0)."""
+    idx = pd.bdate_range("2021-01-04", periods=6)
+    p = pd.DataFrame({"TEST01": 100.0, "TEST02": 50.0}, index=idx)
+
+    class Switch:
+        name = "switch"
+        def weights(self, as_of, history):
+            return {"TEST01": 1.0} if as_of < idx[2] else {"TEST02": 1.0}
+    c = Costs(fee=0.001, fx_spread=0.01, tax_rate=0.0, slippage=0.0)
+    r = run_backtest(p, _fx(p), Switch(), idx[0], costs=c, rebalance="D")
+    after_buy = 10_000_000 / (1.001 * 1.01) * 1.0  # 첫 매수: 원화→달러 환전 + 수수료
+    # 전환: 팔 때 수수료, 살 때 수수료, 환전은 순액 0 → 환전 비용 없음
+    expect = after_buy * (1 - 0.001) / 1.001
+    assert r.nav.iloc[-1] == pytest.approx(expect, rel=1e-4)
+
+
+def test_dividend_tax_on_ex_date():
+    idx = pd.bdate_range("2021-01-04", periods=5)
+    p = pd.DataFrame({"TEST01": 100.0}, index=idx)
+    dy = pd.DataFrame({"TEST01": [0, 0, 0, 0.02, 0]}, index=idx, dtype=float)
+    r = run_backtest(p, _fx(p), BuyAndHold("TEST01"), idx[0], costs=NO_COST, rebalance="D", div_yield=dy)
+    assert r.dividend_taxes == pytest.approx(10_000_000 * 0.02 * 0.15, rel=1e-6)
+    assert r.nav.iloc[-1] == pytest.approx(10_000_000 - 10_000_000 * 0.02 * 0.15, rel=1e-6)
+
+
+def test_year_end_tax_sells_holdings_when_cash_short():
+    idx = pd.bdate_range("2021-12-20", periods=12)
+    p = pd.DataFrame({"TEST01": [100, 100, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200],
+                      "TEST02": 100.0}, index=idx, dtype=float)
+
+    class Rotate:
+        name = "rot"
+        def weights(self, as_of, history):
+            return {"TEST01": 1.0} if as_of < idx[3] else {"TEST02": 1.0}  # 이익 실현 후 전액 재투자 → 현금 0
+    c = Costs(fee=0.0, fx_spread=0.0, tax_rate=0.22, tax_deduction_krw=0.0, slippage=0.0)
+    r = run_backtest(p, _fx(p), Rotate(), idx[0], costs=c, rebalance="D")
+    assert r.taxes[2021] > 0 and any(t.get("why") == "세금" for t in r.trades)
+    assert r.nav.min() > 0
+
+
+def test_none_weights_means_hold():
+    idx = pd.bdate_range("2021-01-04", periods=8)
+    p = pd.DataFrame({"TEST01": 100.0, "TEST02": 100.0}, index=idx)
+
+    class Once:
+        name = "once"
+        def weights(self, as_of, history):
+            return {"TEST01": 0.5, "TEST02": 0.5} if as_of == idx[0] else None
+    r = run_backtest(p, _fx(p), Once(), idx[0], costs=NO_COST, rebalance="D")
+    assert len(r.trades) == 2  # 첫 매수 둘뿐, 이후 None은 매매 없음
+    assert r.weights.iloc[-1].round(6).to_dict() == {"TEST01": 0.5, "TEST02": 0.5}
+
+
+def test_costs_scaled_and_excess_dsr_near_half_when_same_as_bench():
+    from quant.lab.metrics import deflated_sharpe_excess
+    c = Costs().scaled(2)
+    assert c.fee == 0.001 and c.slippage == 0.0006 and c.tax_rate == 0.22
+    idx = pd.bdate_range("2020-01-01", periods=600)
+    rng = np.random.default_rng(0)
+    nav = pd.Series(np.exp(np.cumsum(rng.normal(0, 0.01, 600))), index=idx)
+    noise = pd.Series(np.exp(np.cumsum(rng.normal(0, 0.0005, 600))), index=idx)
+    d = deflated_sharpe_excess(nav * noise, nav, n_trials=1)
+    assert 0.05 < d < 0.95  # S&P와 사실상 같으면 '운 아님'(0.95)에 못 미친다

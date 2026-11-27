@@ -99,17 +99,24 @@ class ForecastRanker:
             return self.timer.exposure(as_of, history)
         return 1.0
 
-    def weights(self, as_of: pd.Timestamp, history: pd.DataFrame) -> dict[str, float]:
+    def rank(self, as_of: pd.Timestamp, history: pd.DataFrame) -> pd.Series | None:
+        """오늘 살 수 있는 종목들의 예측 점수(클수록 좋음). 모델·종목이 모자라면 None. 예측은 IC용으로 기록."""
         assert history.index[-1] <= as_of
         avail = self._available(as_of, history)
         if len(avail) < self.top:
-            return {}
+            return None
         self._fit(as_of)
         if self._model is None:
-            return {}
+            return None
         Xd = self.X.loc[as_of].reindex(avail)[self._cols]
         pred = pd.Series(self._model.predict(Xd.to_numpy(dtype=float)), index=avail)
         self.preds.append((as_of, pred))
+        return pred
+
+    def weights(self, as_of: pd.Timestamp, history: pd.DataFrame) -> dict[str, float]:
+        pred = self.rank(as_of, history)
+        if pred is None:
+            return {}
         pick = list(pred.sort_values(ascending=False).index[: self.top])
         if self.weighting == "invvol":
             iv = 1 / self.vol63.loc[as_of, pick].clip(lower=0.05)
@@ -158,15 +165,18 @@ class MarketTimer:
 
     def __init__(self, name: str, px: pd.DataFrame, macro_f: pd.DataFrame, *, model: str = "logit", feats: str = "PMN",
                  h: int = 21, mode: str = "binary", defensive: str | None = "SHY", refit_months: int = 3, step: int = 5,
-                 train_years: float | None = None):
+                 train_years: float | None = None, cols: list[str] | None = None):
+        """cols: 쓸 지표 특성을 직접 지정(2차 T07·T08 — 사후 수정 없는 시장 지표만). 주면 feats의 지표 목록 대신 쓴다."""
         self.name, self.model_name, self.h, self.mode, self.defensive = name, model, h, mode, defensive
         self.refit_months, self.step, self.train_years = refit_months, step, train_years
         self.px = px
         panel = price_panel(px)
         own = pd.DataFrame({k: panel[k]["SPY"] for k in ["r21", "r63", "r252", "vol21", "vol63", "ma200", "dd252", "rsi14"]})
         _, mf = _feature_sets(feats)
+        if cols is not None:
+            mf = list(cols)
         self.X = own.join(macro_f.reindex(px.index)[mf]) if mf else own
-        if feats == "P":
+        if feats == "P" and cols is None:
             self.X = own
         fwd = forward_return(px[["SPY", "SHY"]], h)
         self.y = (fwd["SPY"] > fwd["SHY"]).astype(float).where(fwd["SPY"].notna() & fwd["SHY"].notna())
