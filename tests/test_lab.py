@@ -204,3 +204,14 @@ def test_costs_scaled_and_excess_dsr_near_half_when_same_as_bench():
     noise = pd.Series(np.exp(np.cumsum(rng.normal(0, 0.0005, 600))), index=idx)
     d = deflated_sharpe_excess(nav * noise, nav, n_trials=1)
     assert 0.05 < d < 0.95  # S&P와 사실상 같으면 '운 아님'(0.95)에 못 미친다
+
+
+def test_fx_needed_only_inside_backtest_range():
+    """신호용 과거 시세가 환율 기록보다 길어도 돈다(구간 안 환율만 필요). 구간 안에 환율이 없으면 멈춘다."""
+    idx = pd.bdate_range("2003-01-01", periods=600)
+    px = pd.DataFrame({"SPY": np.linspace(100, 160, 600)}, index=idx)
+    fx = pd.Series(1200.0, index=idx[300:])
+    res = run_backtest(px, fx, BuyAndHold("SPY"), idx[320], None)
+    assert len(res.nav) == 280
+    with pytest.raises(ValueError, match="환율"):
+        run_backtest(px, fx, BuyAndHold("SPY"), idx[100], None)
