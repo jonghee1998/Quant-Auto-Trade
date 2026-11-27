@@ -51,3 +51,55 @@ def tracking_gap(synth: pd.Series, real: pd.Series) -> dict:
     x = d["s"] - d["r"]
     return {"n": len(df), "gap": float(x.mean() * 252), "te": float(x.std() * np.sqrt(252)),
             "from": str(df.index[0].date()), "to": str(df.index[-1].date())}
+
+
+def with_us_div_tax(kspx_u: pd.Series, spy_div_yield: pd.Series | None, rate: float = 0.15) -> pd.Series:
+    """KSPX_N: 환노출 합성에서 배당락일마다 배당률 × 15%(펀드 안 미국 배당세)를 뗀다(계획 #79)."""
+    if spy_div_yield is None or spy_div_yield.dropna().empty:
+        return kspx_u.copy()
+    y = spy_div_yield.reindex(kspx_u.index).fillna(0.0)
+    return kspx_u * (1 - rate * y).cumprod()
+
+
+def haircut(s: pd.Series, annual: float) -> pd.Series:
+    """연 annual만큼 더 깎은 시세(검산 차이 g·견고성 0.3%p)."""
+    return s * _drag(s.index, annual).reindex(s.index)
+
+
+def align_kr(synth: pd.Series, kr_dates: pd.DatetimeIndex) -> pd.Series:
+    """한국 d일 종가 ↔ 미국 d−1 거래일 값: d보다 앞선 마지막 미국 날짜의 합성 값(장 시각 맞추기)."""
+    s = synth.dropna()
+    pos = s.index.searchsorted(kr_dates, side="left") - 1
+    vals = [s.iloc[p] if p >= 0 else np.nan for p in pos]
+    return pd.Series(vals, index=kr_dates)
+
+
+def tracking_trend(synth: pd.Series, real: pd.Series, lags: int = 20) -> dict:
+    """log(합성 ÷ 실제)의 시간 기울기(연) — 5일 평균, Newey-West 표준오차. 차이만 낸다(수준·성과는 안 냄)."""
+    real = real.dropna()
+    a = align_kr(synth, real.index)
+    y = np.log(a / real).dropna()
+    if len(y) < 30:
+        return {"n": len(y), "g": None}
+    y = y.rolling(5).mean().dropna()
+    t = np.asarray((y.index - y.index[0]).days / 365.25)
+    X = np.column_stack([np.ones_like(t), t])
+    b = np.linalg.lstsq(X, y.to_numpy(), rcond=None)[0]
+    e = y.to_numpy() - X @ b
+    xtx = np.linalg.inv(X.T @ X)
+    u = X * e[:, None]
+    S = u.T @ u
+    for L in range(1, lags + 1):
+        w = 1 - L / (lags + 1)
+        G = u[L:].T @ u[:-L]
+        S += w * (G + G.T)
+    se = float(np.sqrt(max((xtx @ S @ xtx)[1, 1], 0.0)))
+    return {"n": int(len(y)), "g": float(b[1]), "se": se, "upper95": float(b[1] + 1.645 * se),
+            "from": str(y.index[0].date()), "to": str(y.index[-1].date())}
+
+
+def tracking_verdict(tr: dict) -> dict:
+    """계획 #79: 표본 750일 이상, 95% 상한이 추정값 + 0.5%p 안이면 '확인됨'. g > 0이면 g만큼 더 깎음. g > 1%p면 '확인 못 함'."""
+    if tr.get("g") is None or tr["n"] < 750 or tr["upper95"] - tr["g"] > 0.005 or tr["g"] > 0.01:
+        return {"status": "확인 못 함", "deduct": None}
+    return {"status": "확인됨", "deduct": max(0.0, tr["g"])}
