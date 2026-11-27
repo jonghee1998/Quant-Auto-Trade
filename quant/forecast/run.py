@@ -418,19 +418,123 @@ def _round4(a, conn, prices, fx, mf, sha, out: Path) -> int:
         if r["group"] == "F" and a.period == "dev":
             m["f_var"] = res["f_var"]
         m["conditions"] = {k: {kk: v.get(kk) for kk in ("liq_cagr", "mdd", "struct_share", "judge_share", "trades")} for k, v in r["cond"].items()}
-        reg.add(Experiment(r["id"], r["hypothesis"], {"group": r["group"], "account": r["account"], "plan": PLAN_ISSUE},
+        reg.add(Experiment(r["id"], r["hypothesis"], {"group": r["group"], "account": r["account"], "plan": 73},
                            a.period, data_date, sha, _clean(m), False))
     conn.commit()
     for k, df in res.pop("daily").items():
         df.to_csv(out / f"daily-{a.period}-{k}.csv", index_label="date")
     res.pop("_runner", None)
-    meta = {"plan_issue": PLAN_ISSUE, "round": 4, "code_version": sha, "data_date": data_date, "period": a.period,
+    meta = {"plan_issue": 73, "round": 4, "code_version": sha, "data_date": data_date, "period": a.period,
             "n_trials": n, "db_distinct_trials": db_trials, "f_var": res["f_var"], "first_dates": first, "fx_first": fx_first,
             "dev_fx": __import__("quant.lab.splits", fromlist=["DEV_FX"]).DEV_FX, "tracking": track, "tracking_doubtful": doubtful,
             "gl": gl, "dividend_days": int(div.notna().sum().sum()) if not div.empty else 0}
-    md = table4(res, a.period, PLAN_ISSUE, elig, passes, {"합성 시세 검산": track, "R4_GL(보고 전용)": gl} if a.period == "dev" else {"합성 시세 검산": track})
+    md = table4(res, a.period, 73, elig, passes, {"합성 시세 검산": track, "R4_GL(보고 전용)": gl} if a.period == "dev" else {"합성 시세 검산": track})
     (out / f"forecast-{a.period}.md").write_text(md)
     (out / f"forecast-{a.period}.json").write_text(json.dumps({"meta": meta, **res, "eligibility": elig, "passes": passes},
+                                                              ensure_ascii=False, default=str, indent=1))
+    print(md)
+    return 0 if any("error" not in r for r in res["rows"]) else 1
+
+
+def load_kr_sp500(conn) -> dict[str, pd.Series]:
+    """검산용 국내 상장 S&P500 ETF 전부(이름 → 종가). 수집 쪽 이름 규칙(KR_TRACK_NAME)을 다시 쓴다."""
+    from quant.ingest.sources import KR_TRACK_NAME
+    with conn.cursor() as cur:
+        cur.execute("""select i.name, p.date, p.close from prices_daily p join instruments i on i.id = p.instrument_id
+                       where i.market = 'KR' and i.name ilike '%%S&P500%%'""")
+        df = pd.DataFrame(cur.fetchall(), columns=["name", "date", "close"])
+    out = {}
+    for name, g in df.groupby("name"):
+        if KR_TRACK_NAME.match(name.strip()):
+            out[name] = g.assign(date=pd.to_datetime(g["date"])).set_index("date")["close"].astype(float).sort_index()
+    return out
+
+
+def _round5(a, conn, prices, fx, mf, sha, out: Path) -> int:
+    """5차(계획 #79): 검산 먼저 → 입금 일정 × 계좌 구조(가계 모형) → 계획 규칙대로 자격·통과 + 재보고(R4_GL·4차 I)."""
+    from . import synthetic as SYN
+    from .features import asof_series, unrate_signal
+    from .round4 import gl_report
+    from .round5 import BENCH5, ROUND5, ck, eligibility5, pass_table5, run_batch5, strip, table5
+    macro = load_macro(conn, ["IR3TIB01KRM156N", "DTB3", "UNRATE"])
+    idx = prices.index
+    kr3m, us3m = asof_series(macro["IR3TIB01KRM156N"], idx), asof_series(macro["DTB3"], idx)
+    div = load_div_yield(conn)
+    syn = SYN.build(prices, fx, kr3m, us3m)
+    syn["KSPX_N"] = SYN.with_us_div_tax(syn["KSPX_U"], div["SPY"] if "SPY" in div else None)
+    # 0. 검산(실험보다 먼저, 차이만 출력). 판정용 = 재투자형(TR) 중 가장 긴 것, 없으면 일반 중 가장 긴 것
+    real = load_kr_sp500(conn)
+    track, judge_name = {}, None
+    for name, s in real.items():
+        if "(H)" in name:
+            continue
+        cells = {}
+        for col in ("KSPX_U", "KSPX_N"):
+            cells[col] = {"all": SYN.tracking_trend(syn[col], s), "~2024": SYN.tracking_trend(syn[col], s.loc[:"2024-12-31"]),
+                          "2025~": SYN.tracking_trend(syn[col], s.loc["2025-01-01":])}
+        track[name] = cells
+    cands = sorted([n for n in track if "TR" in n], key=lambda n: -len(real[n])) or sorted(track, key=lambda n: -len(real[n]))
+    verdict = {"status": "확인 못 함", "deduct": None, "why": "실제 ETF 시세 없음"}
+    if cands:
+        judge_name = cands[0]
+        verdict = SYN.tracking_verdict(track[judge_name]["KSPX_N"]["all"])
+    tracking_ok = verdict["status"] == "확인됨"
+    g = verdict.get("deduct") or 0.0
+    if g > 0:
+        syn["KSPX_N"] = SYN.haircut(syn["KSPX_N"], g)
+    print(f"검산: {judge_name} → {verdict}", flush=True)
+    px = prices.join(syn)
+    pick = {s.strip() for s in a.ids.split(",") if s.strip()}
+    exps = [e for e in ROUND5 if not pick or e.id in pick]
+    res = run_batch5(px, fx, div, exps, BENCH5, period=a.period, log=lambda s: print(s, flush=True))
+    extra = {"합성 시세 검산(차이만)": {"judge_etf": judge_name, "verdict": verdict,
+                                  "cells": {n: {c: {k: {kk: vv for kk, vv in v.items() if kk in ("n", "g", "upper95")} for k, v in d.items()}
+                                                for c, d in cells.items()} for n, cells in track.items()}}}
+    elig = passes = None
+    if a.period == "dev":
+        elig = eligibility5(res, px, fx, div, tracking_ok)
+        # 재보고 1: 4차 I1~I3(배당세 0, KSPX_U) — 같은 가계 엔진으로
+        from .round5 import E5, Hold
+        r4 = [E5("R4_I1(재)", "재보고", "", lambda: Hold("x", "isa", {"KSPX_N": 1.0}), ("L1억",), "L1억"),
+              E5("R4_I2(재)", "재보고", "", lambda: Hold("x", "isa", {"KSPX_N": 0.9, "KUST_U": 0.1}, rebalance="band"), ("L1억",), "L1억"),
+              E5("R4_I3(재)", "재보고", "", lambda: Hold("x", "isa", {"KSPX_N": 0.8, "KUST_U": 0.2}, rebalance="band"), ("L1억",), "L1억")]
+        px4 = px.copy()
+        px4["KSPX_N"] = px["KSPX_U"]
+        rr = run_batch5(px4, fx, div, r4, [], period="dev", log=lambda s: print("[4차 재] " + s, flush=True))
+        extra["4차 I 재계산(배당세 0)"] = {r["id"]: {k: round(v["irr"] * 100, 2) for k, v in r["cond"].items() if "_x1" in k}
+                                      for r in strip(rr)["rows"] if "error" not in r}
+        # 재보고 2: R4_GL — 늦은 발표 검사는 기준일 1979-01~2020-12 안만, 범위 안이면 실제 발표일 그대로 쓰고 날짜 출력
+        um = macro.get("UNRATE")
+        late = um[((pd.to_datetime(um["release_date"]) - pd.to_datetime(um["ref_date"])).dt.days > 60)] if um is not None else None
+        late_in = late[(pd.to_datetime(late["ref_date"]) >= "1979-01-01") & (pd.to_datetime(late["ref_date"]) <= "2020-12-31")] if late is not None else []
+        vf = px[["VFINX"]].rename(columns={"VFINX": "SPY"}).copy() if "VFINX" in px else None
+        if vf is not None:
+            vf["SHY"] = (1 + us3m.reindex(px.index).ffill().fillna(0) / 100 / 252).cumprod() * 100
+            gl = gl_report(vf, unrate_signal(um, px.index))
+        else:
+            gl = {"status": "확인 못 함(VFINX 없음)"}
+        gl["late_all"] = [] if late is None else [str(x) for x in late["ref_date"].tolist()]
+        gl["late_in_range"] = [] if late_in is None or len(late_in) == 0 else [str(x) for x in late_in["ref_date"].tolist()]
+        extra["R4_GL 재보고"] = gl
+    else:
+        passes = pass_table5(res, px, fx, div)
+    reg = DbRegistry(conn)
+    data_date = str(prices.index[-1].date())
+    for r in res["rows"]:
+        if r["benchmark"] or "error" in r:
+            continue
+        b = r["cond"].get(r["base"]) or next(iter(r["cond"].values()))
+        m = {k: v for k, v in b.items() if not k.startswith("_") and k not in ("declines",)}
+        m["conditions"] = {k: {kk: v.get(kk) for kk in ("irr", "struct_share", "mdd_krw", "mdd_usd")} for k, v in r["cond"].items()}
+        reg.add(Experiment(r["id"], r["hypothesis"], {"group": r["group"], "plan": PLAN_ISSUE, "base": r["base"]}, a.period, data_date,
+                           sha, _clean(m), False))
+    conn.commit()
+    strip(res)
+    md = table5(res, a.period, PLAN_ISSUE, elig, passes, extra)
+    meta = {"plan_issue": PLAN_ISSUE, "round": 5, "code_version": sha, "data_date": data_date, "period": a.period,
+            "tracking_ok": tracking_ok, "deduct": g, "db_distinct_trials": reg.distinct_trials()}
+    (out / f"forecast-{a.period}.md").write_text(md)
+    (out / f"forecast-{a.period}.json").write_text(json.dumps({"meta": meta, **res, "eligibility": elig, "passes": passes, "extra": extra},
                                                               ensure_ascii=False, default=str, indent=1))
     print(md)
     return 0 if any("error" not in r for r in res["rows"]) else 1
@@ -441,7 +545,7 @@ def main() -> int:
     ap.add_argument("--period", choices=["dev", "valid"], default="dev")
     ap.add_argument("--ids", default="", help="쉼표로 고르기(빈칸=2차 11개 전부, 기준선은 늘 같이)")
     ap.add_argument("--out", default="lab-out")
-    ap.add_argument("--round", type=int, choices=[1, 2, 3, 4], default=4)
+    ap.add_argument("--round", type=int, choices=[1, 2, 3, 4, 5], default=5)
     a = ap.parse_args()
     url = os.environ.get("DATABASE_URL")
     if not url:
@@ -461,6 +565,8 @@ def main() -> int:
             return _round3(a, conn, prices, fx, mf, sha, out)
         if a.round == 4:
             return _round4(a, conn, prices, fx, mf, sha, out)
+        if a.round == 5:
+            return _round5(a, conn, prices, fx, mf, sha, out)
         div = load_div_yield(conn)
         pick = {s.strip() for s in a.ids.split(",") if s.strip()}
         exps = [e for e in ROUND2 if not pick or e.id in pick]
