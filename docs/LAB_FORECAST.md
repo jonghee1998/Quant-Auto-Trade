@@ -62,3 +62,13 @@ gh workflow run lab-forecast.yml -f period=valid -f ids=C10,X04,...
 - 검증 자격은 계획 규칙대로 코드가 자동으로 정한다(`run.eligibility`, 최대 2개·묶음마다 1개). 검증에서는 세 하락(2018 Q4·2020 봄·2022)과 A·L 묶음의 2005~2009 스트레스 구간을 같이 보고한다.
 - 거시 지표 사후 수정: 계획의 1번(`release_estimated` 표시)은 #58에서 다른 방법으로 이미 고쳤다 — ALFRED 첫 기록 이전 값은 기준일+35일로 바꾸지 않고 FRED `realtime_start`를 발표일로 둔다(migration 0006). T07·T08은 어차피 사후 수정 없는 지표만 쓴다.
 - 결과물(artifact): `forecast-<구간>.md`·`.json`(코드 버전·데이터 날짜·특성별 첫 사용 날짜·조건별 결과·자격), 실험별 `daily-<구간>-<id>.csv`(평가액·S&P·주식 노출).
+
+## 3차 (Fable 설계 #66)
+
+- 질문: 예측 대신 세법(연 250만 원 공제)과 '일부만 줄이기'로 S&P를 세후·원화로 이길 수 있나. 개발 구간을 **2004~2017**로 넓힘(2008년 포함).
+- 실험 10개: H01 절세 매도(11월 말 SPY↔IVV로 공제 90%만큼 이익 실현), D01~D03 200일선 일부 줄이기(30%·50%·월 1회), G01·G02 200일선 + 실업률 상승(첫 발표값), V01 변동성 바닥 60%, M01 SPY 80·TLT 10·GLD 10, C01·C02 일부 줄이기 + 절세 매도. 기준선 B00·BIV(IVV 보유)·B80·B60.
+- 측정: 모든 지표를 **청산 기준 평가액**(`BacktestResult.liq_nav`, 그날 다 팔고 세금까지 낸 뒤 남는 돈)으로. 베타 보정 알파(`metrics.beta_adjusted_alpha`, Newey-West 5)와 그 알파 수익 기준 DSR. 시도 수는 DB의 서로 다른 전략 수와 58 중 큰 쪽.
+- 엔진: 전략에 `wants_state = True`가 있으면 `weights(as_of, history, state)`로 계좌 상태(그날 종가 기준 종목별 평가액·취득원가, 현금, 올해 실현이익)를 넘긴다.
+- 자격·올리기·통과 기준은 계획 숫자 그대로 `quant/forecast/round3.py`(`eligibility3`, `pass_table3`). 검증 때 2004~2022 합친 알파 t도 계산.
+- 주 1회 규칙(C01)의 절세 매도는 '11월 마지막 주 확인일'(다음 확인일이 12월인 날)에 한다.
+- 실행: `python -m quant.forecast.run --period dev`(기본 3차). 2차는 `--round 2`(이제 개발 구간이 넓어져 2차 숫자와 다르게 나온다).

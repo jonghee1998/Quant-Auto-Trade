@@ -120,6 +120,45 @@ def excess_sharpe(nav: pd.Series, bench: pd.Series) -> float:
     return float(ex.mean() / ex.std()) if len(ex) > 2 and ex.std() > 0 else float("nan")
 
 
+def beta_adjusted_alpha(nav: pd.Series, market: pd.Series, safe: pd.Series, lags: int = 5) -> dict:
+    """일별 (전략 − 단기채) = α + β × (S&P − 단기채) + 잔차 (계획 #66). 셋 다 같은 통화(원화) 평가액.
+    반환: 연 α(×252), β, Newey-West(지연 lags) t값, 일별 '알파 수익'(α + 잔차) 시계열, 관측 수."""
+    df = pd.concat([nav, market, safe], axis=1, keys=["s", "m", "f"]).dropna().pct_change(fill_method=None).dropna()
+    nanres = {"alpha": float("nan"), "beta": float("nan"), "t": float("nan"), "resid": pd.Series(dtype=float), "n": len(df)}
+    if len(df) < 30:
+        return nanres
+    y = (df["s"] - df["f"]).to_numpy()
+    x = (df["m"] - df["f"]).to_numpy()
+    X = np.column_stack([np.ones_like(x), x])
+    xtx_inv = np.linalg.pinv(X.T @ X)
+    b = xtx_inv @ X.T @ y
+    e = y - X @ b
+    # Newey-West(Bartlett 가중) 공분산
+    u = X * e[:, None]
+    S = u.T @ u
+    for L in range(1, lags + 1):
+        w = 1 - L / (lags + 1)
+        G = u[L:].T @ u[:-L]
+        S += w * (G + G.T)
+    cov = xtx_inv @ S @ xtx_inv
+    se = math.sqrt(max(cov[0, 0], 0.0))
+    resid = pd.Series(b[0] + e, index=df.index)
+    return {"alpha": float(b[0] * TRADING_DAYS), "beta": float(b[1]), "t": float(b[0] / se) if se > 0 else float("nan"),
+            "resid": resid, "n": len(df)}
+
+
+def alpha_sharpe(resid: pd.Series) -> float:
+    """알파 수익(α + 잔차)의 일 단위 샤프 — 묶음 전체 분산 계산용."""
+    return float(resid.mean() / resid.std()) if len(resid) > 2 and resid.std() > 0 else float("nan")
+
+
+def deflated_sharpe_alpha(resid: pd.Series, n_trials: int, trial_var: float | None = None) -> float:
+    """베타 보정 알파 기준 DSR: 주식을 덜 든 만큼은 빼고, 남는 수익이 우연인지(계획 #66)."""
+    if len(resid) < 3:
+        return float("nan")
+    return deflated_sharpe((1 + resid).cumprod(), n_trials, trial_var)
+
+
 def liquidated_cagr(after_tax: float, capital: float, nav: pd.Series) -> float:
     """마지막 날 다 팔고 세금까지 낸 금액 기준 연수익."""
     years = (nav.index[-1] - nav.index[0]).days / 365.25

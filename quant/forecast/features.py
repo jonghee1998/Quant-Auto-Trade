@@ -69,6 +69,30 @@ MACRO_FEATS = ["vix", "vix_term", "baa", "baa_ch21", "hy", "hy_ch21", "ig_ch21",
 NEWS_FEATS = ["epu_z", "emv_z"]  # 신문 기사 기반(Baker·Bloom·Davis) — 2005년부터 있는 뉴스 재료
 
 
+def unrate_signal(rows: pd.DataFrame, dates: pd.DatetimeIndex, n: int = 12) -> pd.DataFrame:
+    """실업률 첫 발표값(rows: ref_date, release_date, value)으로 날짜마다 '최신값'과 '그 직전 n개 발표값 평균'.
+    그날까지 발표된 값만 쓴다(발표일 ≤ 그날). 값이 n+1개 미만이면 빈 칸."""
+    out = pd.DataFrame(index=dates, columns=["latest", "prev_mean"], dtype=float)
+    if rows is None or rows.empty:
+        return out
+    r = rows.dropna(subset=["value"]).copy()
+    r["ref_date"], r["release_date"] = pd.to_datetime(r["ref_date"]), pd.to_datetime(r["release_date"])
+    r = r.sort_values("release_date")
+    known: dict[pd.Timestamp, float] = {}
+    events = []
+    for rel, g in r.groupby("release_date"):
+        for _, x in g.iterrows():
+            known[x["ref_date"]] = float(x["value"])
+        refs = sorted(known)
+        if len(refs) >= n + 1:
+            vals = [known[k] for k in refs]
+            events.append((rel, vals[-1], float(np.mean(vals[-n - 1:-1]))))
+    if not events:
+        return out
+    ev = pd.DataFrame(events, columns=["date", "latest", "prev_mean"]).set_index("date")
+    return ev.reindex(ev.index.union(dates)).ffill().reindex(dates)
+
+
 def macro_panel(macro: dict[str, pd.DataFrame], dates: pd.DatetimeIndex) -> pd.DataFrame:
     """macro: 지표 이름 → (ref_date, release_date, value) 표. 반환: 날짜 × 특성(발표일 기준)."""
     g = {k: asof_series(v, dates) for k, v in macro.items()}
@@ -97,6 +121,9 @@ def macro_panel(macro: dict[str, pd.DataFrame], dates: pd.DatetimeIndex) -> pd.D
     f["epu_z"] = _z(np.log(s("USEPUINDXD").rolling(21, min_periods=10).mean()))
     f["emv_z"] = _z(np.log(s("WLEMUINDXD").rolling(21, min_periods=10).mean()))
     f["krw_ch21"] = s("DEXKOUS") / s("DEXKOUS").shift(21) - 1
+    # 3차 G01·G02: 실업률 첫 발표값의 최신값과 직전 12개 평균(발표일 기준). 특성 목록(MACRO_FEATS)에는 안 넣는다.
+    u = unrate_signal(macro.get("UNRATE"), dates)
+    f["unrate_latest"], f["unrate_prev12"] = u["latest"].astype(float), u["prev_mean"].astype(float)
     return f.replace([np.inf, -np.inf], np.nan)
 
 

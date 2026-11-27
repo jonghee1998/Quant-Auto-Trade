@@ -9,12 +9,13 @@ from typing import Callable
 
 import pandas as pd
 
-from .rules import SECTORS, Banded, FixedMix, RankHold, SectorHold, TrendState, TrendSwitch, VolTarget
+from .rules import (SECTORS, Banded, BandedMix, FixedMix, GrowthTrend, HarvestOverlay, RankHold, SectorHold, TaxHarvest,
+                    TrendPartial, TrendState, TrendSwitch, VolFloor, VolTarget)
 from .strategy import ForecastRanker, MarketTimer
 
 # 이 실험 묶음을 설계한 Fable 계획 Issue 번호(라벨 lab:fable-plan). lab-forecast는 이게 없으면 돌지 않는다.
-# 1차(30개)는 Fable 설계 없이 만들어졌다(실수). 2차(아래 ROUND2)는 Fable 설계 #59 그대로.
-PLAN_ISSUE: int | None = 59
+# 1차(30개)는 Fable 설계 없이 만들어졌다(실수). 2차(ROUND2)는 Fable 설계 #59, 3차(ROUND3)는 #66 그대로.
+PLAN_ISSUE: int | None = 66
 
 UNIVERSE = ["SPY", "QQQ", "IWM", "DIA", "XLK", "XLF", "XLE", "XLV", "XLY", "XLP", "XLI", "XLU", "XLB", "XLRE", "XLC",
             "SOXX", "EFA", "EEM", "EWJ", "VGK", "EWY", "EWT", "EWZ", "MCHI", "INDA", "TLT", "IEF", "GLD", "VNQ"]
@@ -113,7 +114,7 @@ ROUND1: list[Exp] = [
 ]
 assert len(ROUND1) == 30 and len({e.id for e in ROUND1}) == 30
 MACRO_SERIES = ["VIXCLS", "VXVCLS", "BAA10Y", "BAMLH0A0HYM2", "BAMLC0A0CM", "T10Y2Y", "T10Y3M", "DGS10", "DFII10", "T5YIE", "DTWEXBGS",
-                "DCOILWTICO", "NFCI", "STLFSI4", "ICSA", "SAHMREALTIME", "UMCSENT", "USEPUINDXD", "WLEMUINDXD", "DEXKOUS"]
+                "DCOILWTICO", "NFCI", "STLFSI4", "ICSA", "SAHMREALTIME", "UMCSENT", "USEPUINDXD", "WLEMUINDXD", "DEXKOUS", "UNRATE"]
 
 
 # ── 2차(Fable 설계 #59) ── 조절값은 계획에 적힌 그대로 고정. 바꾸면 새 id(시도 +1).
@@ -156,6 +157,41 @@ BENCHMARKS: list[Exp] = [
     Exp("B60", "기준선", "SPY 60%·SHY 40%(해마다 맞춤)", lambda px, mf: FixedMix("B60", {"SPY": 0.6, "SHY": 0.4}), "M"),
     Exp("BEQ", "기준선", "업종 11개 똑같이(해마다 맞춤)", lambda px, mf: FixedMix("BEQ"), "M"),
 ]
-PREV_TRIALS = 37   # 이전까지 누적 시도(계획 #59) → 개발 DSR 시도 수 = 37 + 11 = 48
-EXPERIMENTS = ROUND2   # 기본 실행 대상(1차는 기록용, --round 1 로만)
-assert len(ROUND2) == 11 and len({e.id for e in ROUND2 + BENCHMARKS}) == 14
+assert len(ROUND2) == 11
+
+# ── 3차(Fable 설계 #66) ── 예측 대신 세법(250만 원 공제)과 '일부만 줄이기'. 개발 구간 2004~2017. 조절값 고정.
+def _u(mf):
+    return pd.DataFrame({"latest": mf["unrate_latest"], "prev_mean": mf["unrate_prev12"]}) if "unrate_latest" in mf \
+        else pd.DataFrame(index=mf.index, columns=["latest", "prev_mean"], dtype=float)
+
+
+ROUND3: list[Exp] = [
+    Exp("H01", "H", "해마다 공제 한도만큼 이익을 실현(SPY↔IVV)하면 청산 세후 연수익이 SPY·IVV 보유보다 0.1%p 이상 높다",
+        lambda px, mf: TaxHarvest("H01"), "M"),
+    Exp("D01", "D", "200일선 아래에서 30%만 줄이면 최악 손실 ≤ S&P×0.85, 베타 보정 알파 > 0",
+        lambda px, mf: TrendPartial("D01", avoid_equity=0.7, band=0.02), "W"),
+    Exp("D02", "D", "같은 규칙으로 50% 줄이면 D01보다 손실이 작고 알파는 D01 이상",
+        lambda px, mf: TrendPartial("D02", avoid_equity=0.5, band=0.02), "W"),
+    Exp("D03", "D", "월 1회만 보는 30% 줄이기가 D01보다 매매가 적고 알파는 같거나 높다",
+        lambda px, mf: TrendPartial("D03", avoid_equity=0.7, band=0.0), "M"),
+    Exp("G01", "G", "200일선 아래 + 실업률 상승 중일 때만 피하면 헛매매가 줄고 알파 > 0",
+        lambda px, mf: GrowthTrend("G01", _u(mf), avoid_equity=0.0), "M"),
+    Exp("G02", "G", "G01에서 절반만 줄여도 손실 ≤ S&P×0.85, 청산 세후 연수익 ≥ G01",
+        lambda px, mf: GrowthTrend("G02", _u(mf), avoid_equity=0.5), "M"),
+    Exp("V01", "V", "변동성이 높을 때 주식을 최대 40%까지만 줄이면(바닥 60%) 알파 > 0",
+        lambda px, mf: VolFloor("V01", target=0.15, floor=0.6, band=0.15), "W"),
+    Exp("M01", "M", "방어 20%를 장기채·금에 나누면 B80보다 청산 세후 연수익·최악 손실이 모두 낫다",
+        lambda px, mf: BandedMix("M01", {"SPY": 0.8, "TLT": 0.1, "GLD": 0.1}, band=0.05), "M"),
+    Exp("C01", "C", "D01 + 절세 매도(이익 비율 낮은 쪽부터 줄임)면 D01보다 청산 세후 0.1%p 이상 높다",
+        lambda px, mf: HarvestOverlay("C01", TrendPartial("C01_base", avoid_equity=0.7, band=0.02), step_days=7), "W"),
+    Exp("C02", "C", "G02 + 절세 매도면 G02보다 청산 세후 0.1%p 이상 높다",
+        lambda px, mf: HarvestOverlay("C02", GrowthTrend("C02_base", _u(mf), avoid_equity=0.5), step_days=31), "M"),
+]
+BENCHMARKS3: list[Exp] = [
+    Exp("BIV", "기준선", "IVV 그냥 보유(H01 이득이 종목 차이인지 가림)", lambda px, mf: FixedMix("BIV", {"IVV": 1.0}), "M"),
+    Exp("B80", "기준선", "SPY 80%·SHY 20%(해마다 맞춤)", lambda px, mf: FixedMix("B80", {"SPY": 0.8, "SHY": 0.2}), "M"),
+    Exp("B60", "기준선", "SPY 60%·SHY 40%(해마다 맞춤)", lambda px, mf: FixedMix("B60", {"SPY": 0.6, "SHY": 0.4}), "M"),
+]
+PREV_TRIALS = 48   # 3차 전까지 누적 시도(계획 #66: 1차 30 + 7 + 2차 11) → 개발 DSR 시도 수 = 48 + 10 = 58 (DB 값이 크면 그쪽)
+EXPERIMENTS = ROUND3   # 기본 실행 대상
+assert len(ROUND3) == 10 and len({e.id for e in ROUND3 + BENCHMARKS3}) == 13
