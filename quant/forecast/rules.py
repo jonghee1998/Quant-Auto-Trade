@@ -341,7 +341,9 @@ class TaxHarvest:
         vals[a] -= amt
         vals[b] = vals.get(b, 0.0) + amt
         self.harvests.append((as_of, a, amt))
-        return {t: v / state["value"] for t, v in vals.items() if v > 1e-6}
+        # 배당세를 현금에서 빼 현금이 음수일 수 있다 → 비중 분모는 보유액 합과 총액 중 큰 쪽(합이 1을 넘지 않게)
+        den = max(state["value"], sum(v for v in vals.values() if v > 0))
+        return {t: v / den for t, v in vals.items() if v > 1e-6}
 
 
 class HarvestOverlay:

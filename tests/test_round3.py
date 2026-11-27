@@ -163,3 +163,14 @@ def test_round3_batch_eligibility_and_table():
     assert "실험실 3차" in table3(res, "dev", 66, e)
     p = pass_table3(res["rows"], {"D01": 2.5})
     assert p["H01"]["checks"][0][0].startswith("1") and isinstance(p["D01"]["pass"], bool)
+
+
+def test_harvest_weights_never_exceed_one_when_cash_negative():
+    """배당세로 현금이 음수인 날(보유액 > 총액)에도 비중 합 ≤ 1 (3차 dev 실행 H01 실패 재현)."""
+    s = R.TaxHarvest("H01")
+    idx = pd.bdate_range("2010-11-01", "2010-11-30")
+    px = pd.DataFrame({"SPY": 100.0, "IVV": 100.0}, index=idx)
+    s.weights(idx[0], px.loc[: idx[0]], {"value": 1e8, "positions": {}, "realized": 0.0})
+    st = {"value": 1.0e8, "cash": -2e5, "realized": 0.0, "positions": {"SPY": {"value": 1.002e8, "basis": 5e7}}}
+    w = s.weights(idx[-1], px, st)
+    assert w is not None and sum(w.values()) <= 1 + 1e-12
