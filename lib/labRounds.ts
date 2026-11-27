@@ -1,103 +1,70 @@
-/** 실험실 라운드별 Fable 설계·판정 요약(판정 Issue 원문에서 옮김). 숫자는 화면에서 DB(experiments)로 읽는다.
- *  새 라운드가 끝나면 Fable 판정 Issue를 보고 여기에 한 칸 추가한다. */
+/** 실험실 기록: 라운드별 실험 하나하나의 한 줄 요약·접근 방법·결과(끝난 라운드라 고정 기록).
+ *  숫자는 lab-forecast 실행 결과(개발 2010~17, 검증 2018~22), 판정·이유는 Fable 판정 Issue(#57·#62)에서 옮김.
+ *  새 라운드가 끝나면 맨 앞에 한 칸 추가한다. 비율은 % 숫자(10.3 = +10.3%). */
 export type Verdict = '후보' | '보류' | '탈락';
-export type Round = {
-  round: number;
-  title: string;
-  question: string;
-  conclusion: string;
-  planIssue: number | null;
-  judgeIssue: number;
-  learned: string[];
-  next: string[];
-  /** 실험 id → [판정, 한 줄 이유]. 여러 id를 같이 쓰면 'C01~C12'처럼 범위로 */
-  verdicts: { ids: string[]; v: Verdict; why: string }[];
-  /** 이 라운드 숫자를 읽는 방법: liq = 청산 세후(2차~), cagr = 세금 전 연수익(1차) */
-  metric: 'liq' | 'cagr';
-  plan: number | null; // experiments.params.plan 값(2차~). 1차는 null
-};
+export type Result = { ret: number; bench: number; mdd: number; benchMdd: number };
+export type LabExp = { id: string; name: string; approach: string; v: Verdict; dev: Result; valid?: Result; note: string };
+export type Round = { round: number; title: string; conclusion: string; basis: string; planIssue: number | null; judgeIssue: number; exps: LabExp[] };
 
-const range = (p: string, a: number, b: number) => Array.from({ length: b - a + 1 }, (_, i) => `${p}${String(a + i).padStart(2, '0')}`);
+const r = (ret: number, bench: number, mdd: number, benchMdd: number): Result => ({ ret, bench, mdd, benchMdd });
+const D2 = (ret: number, mdd: number) => r(ret, 10.3, mdd, -19); // 2차 개발: S&P 청산 세후 +10.3%, 최악 −19%
+const D1 = (ret: number, mdd: number) => r(ret, 12.6, mdd, -19); // 1차 개발: S&P +12.6%, 최악 −19%
+const V1 = (ret: number, mdd: number) => r(ret, 12.8, mdd, -30); // 1차 검증: S&P +12.8%, 최악 −30%
 
 export const ROUNDS: Round[] = [
   {
-    round: 2, title: '위험 조절 규칙·깨끗한 지표·업종', planIssue: 59, judgeIssue: 62, metric: 'liq', plan: 59,
-    question: '예측 없이 단순한 위험 조절 규칙(변동성 맞추기·200일선)이 S&P보다 덜 잃으면서 비슷하게 버는가? 깨끗한 지표 타이밍·업종 순위는 그보다 나은가?',
-    conclusion: '후보 없음. 11개 모두 개발 구간(2010~2017)에서 S&P 그냥 보유보다 못해 검증에 올린 것이 없다.',
-    learned: [
-      '손해의 주범은 수수료가 아니라 전부 팔 때 내는 양도세 22%와 팔고 나면 반등하는 뒷북',
-      '업종 11개끼리만 비교하면 순위 예측력이 사라진다(IC +0.005) — 1차의 예측력은 주식·채권 구분 효과였다',
-      '깨끗한 지표만 쓴 타이밍은 적중률이 "늘 오른다" 찍기보다 낮다',
-      '개발 구간이 오르기만 한 장이라 방어 규칙은 보여 줄 것이 없었다',
-    ],
-    next: ['연 250만 원 공제를 쓰는 절세 매도', '200일선 아래면 전부 대신 일부만 줄이기', '2008년을 포함한 넓은 개발 구간', '베타 보정 알파로 우연 보정'],
-    verdicts: [
-      { ids: ['K03'], v: '보류', why: '0에 가장 가깝지만 70%가 S&P라서. 나머지 30%는 예측력 0 — 같은 설정 재시도 안 함' },
-      { ids: ['A01'], v: '탈락', why: '1.5%p 뒤지고 최악 손실은 그대로. 8년 중 7년을 졌다' },
-      { ids: ['A02'], v: '탈락', why: '최악 손실이 오히려 큼. 팔 때마다 쌓인 이익에 세금을 낸다' },
-      { ids: ['A03'], v: '탈락', why: '2015~16년에 싸게 팔고 비싸게 되사기를 두 번 반복' },
-      { ids: ['A04'], v: '탈락', why: '두 규칙의 나쁜 점이 합쳐짐' },
-      { ids: ['L01'], v: '탈락', why: '내린 달에 S&P의 1.29배 빠짐. 2017년 한 해만 좋았다' },
-      { ids: ['L02'], v: '탈락', why: '200일선을 더해도 최악 손실이 더 큼' },
-      { ids: ['T07'], v: '탈락', why: '적중 68% < "늘 오른다" 69%. 예측력 없음' },
-      { ids: ['T08'], v: '탈락', why: '적중 63%로 T07보다 나쁨' },
-      { ids: ['K01'], v: '탈락', why: '업종 11개 똑같이 담기보다 낮음' },
-      { ids: ['K02'], v: '탈락', why: '예측력 0(IC +0.005, t 0.1). 수익은 운으로 봐야 함' },
+    round: 2, title: '위험 조절 규칙·업종', planIssue: 59, judgeIssue: 62,
+    conclusion: '후보 없음. 11개 모두 S&P 그냥 보유보다 못해 검증에 올린 것이 없다.',
+    basis: '1억 원·마지막 날 다 팔고 세금 낸 뒤 연수익',
+    exps: [
+      { id: 'K03', name: 'S&P 70% + 업종 3개', approach: 'S&P 70% 고정, 나머지 30%는 업종 11개 중 예측(릿지) 상위 3개 · 월 1회', v: '보류', dev: D2(10.2, -20), note: '거의 S&P지만 70%가 S&P라서. 나머지 30%는 예측력 0' },
+      { id: 'L01', name: '1.5배까지 늘리기', approach: '변동성 낮으면 S&P 2배 ETF로 최대 1.5배, 높으면 줄임 · 주 1회', v: '탈락', dev: D2(9.4, -21), note: '내린 달에 S&P의 1.29배 빠짐' },
+      { id: 'K02', name: '업종 순위 예측', approach: '업종 11개를 가격 특성 릿지로 순위 예측, 상위 3개(5위 밖일 때만 교체) · 월 1회', v: '탈락', dev: D2(9.5, -24), note: '예측력 0(IC +0.005). 수익은 운' },
+      { id: 'A01', name: '변동성 맞추기', approach: '주식 비중 = 15% ÷ 최근 21일 변동성, 나머지 단기채 · 주 1회, 10%p 넘게 바뀔 때만', v: '탈락', dev: D2(8.8, -19), note: '1.5%p 뒤지고 손실은 그대로' },
+      { id: 'K01', name: '업종 상위 3개', approach: '업종 11개 중 최근 12개월(마지막 1개월 뺌) 수익 상위 3개, 5위 밖일 때만 교체 · 월 1회', v: '탈락', dev: D2(8.1, -21), note: '11개 똑같이 담기(+9.9%)보다 낮음' },
+      { id: 'T07', name: '확률 타이밍(월)', approach: 'VIX·금리차·신용 스프레드 등 수정 없는 지표로 "다음 달 S&P가 이길 확률" → 주식 비중 · 월 1회', v: '탈락', dev: D2(7.6, -17), note: '적중 68% < "늘 오른다" 69%' },
+      { id: 'T08', name: '확률 타이밍(주)', approach: 'T07을 주 1회 보고 25%p 넘게 바뀔 때만 매매', v: '탈락', dev: D2(7.5, -18), note: '적중 63%, T07보다 나쁨' },
+      { id: 'A02', name: '200일선(월)', approach: '월말 S&P가 200일 평균 아래면 단기채 100%, 위면 S&P 100%', v: '탈락', dev: D2(6.8, -23), note: '팔 때마다 양도세, 손실도 더 큼' },
+      { id: 'L02', name: '1.5배 + 200일선', approach: 'L01에 200일선 상태를 더함(아래면 전부 단기채)', v: '탈락', dev: D2(5.8, -25), note: '손실이 L01보다도 큼' },
+      { id: 'A03', name: '200일선(주·띠)', approach: '주 1회, 200일 평균의 98% 밑이면 피하고 102% 위면 다시 삼', v: '탈락', dev: D2(5.1, -26), note: '2015~16년 싸게 팔고 비싸게 되사기 2번' },
+      { id: 'A04', name: '변동성 + 200일선', approach: 'A01 비중에 200일선 상태를 더함(피함이면 0%)', v: '탈락', dev: D2(5.0, -24), note: '두 규칙의 나쁜 점이 합쳐짐' },
     ],
   },
   {
-    round: 1, title: '예측 기반 30개', planIssue: null, judgeIssue: 57, metric: 'cagr', plan: null,
-    question: '가격·거시 지표·뉴스 지수로 ETF 순위나 시장 방향을 예측하면(ML·DL) S&P보다 나은가?',
-    conclusion: '후보 없음. 가장 나은 시장 타이밍(T04·T05)도 S&P 그냥 보유와 사실상 구별되지 않는다. (설계를 Fable 없이 해서 2차부터 Fable 설계로 바꿈)',
-    learned: ['한 달 안에 무너지는 하락은 월 1회 판단으로 못 피한다', '주 스윙은 매매 2천 회 넘게 비용에 다 먹힌다', '일부 거시 지표에 사후 수정값이 섞여 있었다(#58에서 고침)'],
-    next: ['위험 조절 규칙(변동성·200일선)', '깨끗한 지표만 쓴 타이밍', '업종 안에서만 순위'],
-    verdicts: [
-      { ids: ['T05'], v: '보류', why: '검증 +13.8% vs S&P +12.8%지만 최악 손실이 같고(−30%) 우연 보정 실패' },
-      { ids: ['T04'], v: '보류', why: 'T05에 뉴스 지수 2개만 더한 것이라 별개 증거가 아님' },
-      { ids: ['T01'], v: '탈락', why: 'T04와 같은 모델, 매매 방식만 다름 — 볼 것이 없다' },
-      { ids: ['T02', 'T06'], v: '탈락', why: '연 2~5%p 낮고 적중률이 기본보다 낮다' },
-      { ids: ['T03'], v: '탈락', why: '적중 45%, 최악 −36%' },
-      { ids: range('C', 1, 12), v: '탈락', why: '전부 S&P보다 연 4~12%p 낮음. 순위 예측력이 수익으로 안 이어짐' },
-      { ids: range('X', 1, 5), v: '탈락', why: '약한 순위 모델에 위험 관리를 얹어 수익만 깎였다' },
-      { ids: range('S', 1, 4), v: '탈락', why: '매매 2천 회 넘게 비용에 다 먹힘' },
-      { ids: range('R', 1, 3), v: '탈락', why: '연 +3.7~5.5%, 최악 손실도 더 나쁨' },
+    round: 1, title: '예측 기반 30개', planIssue: null, judgeIssue: 57,
+    conclusion: '후보 없음. 가장 나은 타이밍(T04·T05)도 S&P와 사실상 구별 안 됨.',
+    basis: '1천만 원·세금 전 연수익(연말 실현 세금은 반영)',
+    exps: [
+      { id: 'T05', name: '거시 지표 타이밍', approach: '금리·신용·달러·유가·고용으로 "다음 달 S&P가 이길 확률"(로지스틱) → 확률만큼 주식 · 월 1회', v: '보류', dev: D1(12.5, -11), valid: V1(13.8, -30), note: '검증에서 1%p 앞섰지만 손실이 S&P와 같고 우연 보정 실패' },
+      { id: 'T04', name: '거시+뉴스 타이밍', approach: 'T05 + 뉴스 기사 기반 불확실성 지수 2개', v: '보류', dev: D1(11.4, -11), valid: V1(14.0, -30), note: 'T05와 같은 모델이라 별개 증거 아님' },
+      { id: 'T01', name: '타이밍 켜고 끄기', approach: 'T04 확률이 50% 넘으면 S&P 100%, 아니면 단기채', v: '탈락', dev: D1(11.3, -13), valid: V1(13.2, -30), note: '5년간 매매 10회, 볼 것이 없음' },
+      { id: 'T06', name: '가격만 타이밍', approach: 'S&P 가격 특성만 트리 부스팅으로 확률 → 주식 비중', v: '탈락', dev: D1(7.9, -15), valid: V1(10.2, -29), note: '적중 62% < 기본 65%' },
+      { id: 'T02', name: '부스팅 타이밍', approach: 'T01을 트리 부스팅 모델로', v: '탈락', dev: D1(8.8, -19), valid: V1(10.8, -30), note: '적중 58% < 기본 65%' },
+      { id: 'T03', name: '신경망 타이밍', approach: 'T01을 신경망(MLP)으로', v: '탈락', dev: D1(1.1, -36), note: '적중 45%, 최악 −36%' },
+      { id: 'C12', name: '부스팅 상위 5 분산', approach: 'ETF 29개 순위(부스팅) 상위 5개를 변동성 반비례로 나눠 담음 · 월 1회', v: '탈락', dev: D1(7.9, -20), note: '4.7%p 뒤짐' },
+      { id: 'C03', name: '가격 + 신경망 순위', approach: 'ETF 29개를 가격 특성 신경망으로 다음 달 순위 예측, 상위 3개', v: '탈락', dev: D1(8.5, -23), note: '4.1%p 뒤지고 손실 더 큼' },
+      { id: 'C05', name: '거시 + 부스팅 순위', approach: '가격 + 거시 지표, 트리 부스팅 순위 상위 3개', v: '탈락', dev: D1(6.6, -23), note: '6%p 뒤짐' },
+      { id: 'C06', name: '거시 + 신경망 순위', approach: '가격 + 거시 지표, 신경망 순위 상위 3개', v: '탈락', dev: D1(6.5, -21), note: '6.1%p 뒤짐' },
+      { id: 'C08', name: '뉴스 + 부스팅 순위', approach: '가격 + 거시 + 뉴스 지수, 트리 부스팅 순위 상위 3개', v: '탈락', dev: D1(6.4, -18), note: '6.2%p 뒤짐' },
+      { id: 'C02', name: '가격 + 부스팅 순위', approach: '가격 특성 트리 부스팅 순위 상위 3개', v: '탈락', dev: D1(5.8, -24), note: '6.8%p 뒤짐' },
+      { id: 'C10', name: '세 모델 평균 순위', approach: '릿지·부스팅·신경망 순위 평균 상위 3개', v: '탈락', dev: D1(5.3, -21), note: '평균해도 7.3%p 뒤짐' },
+      { id: 'C01', name: '가격 + 릿지 순위', approach: '가격 특성 선형(릿지) 순위 상위 3개', v: '탈락', dev: D1(4.7, -23), note: '예측력(IC)은 제일 높았지만 수익으로 안 이어짐' },
+      { id: 'C04', name: '거시 + 릿지 순위', approach: '가격 + 거시 지표(베타 곱) 릿지 순위 상위 3개', v: '탈락', dev: D1(2.3, -30), note: '10.3%p 뒤짐' },
+      { id: 'C11', name: '랜덤 포레스트 순위', approach: '가격 + 거시 + 뉴스, 랜덤 포레스트 순위 상위 3개', v: '탈락', dev: D1(1.9, -28), note: '예측력 거의 0' },
+      { id: 'C07', name: '뉴스 + 릿지 순위', approach: '가격 + 거시 + 뉴스 지수 릿지 순위 상위 3개', v: '탈락', dev: D1(1.2, -35), note: '최악 −35%' },
+      { id: 'C09', name: '뉴스 + 신경망 순위', approach: '가격 + 거시 + 뉴스 지수 신경망 순위 상위 3개', v: '탈락', dev: D1(1.0, -25), note: '11.6%p 뒤짐' },
+      { id: 'X02', name: '순위 + 타이밍', approach: 'C10 순위 상위 3개를 T04 확률만큼만 담음', v: '탈락', dev: D1(5.4, -17), note: '약한 순위에 타이밍을 얹어 수익만 깎임' },
+      { id: 'X05', name: '최근 8년만 학습', approach: 'C10을 최근 8년 자료로만 학습', v: '탈락', dev: D1(4.3, -21), note: '더 안정적이지 않음' },
+      { id: 'X04', name: '자동매매 후보형', approach: '상위 5개 변동성 반비례 + 타이밍 + 목표 변동성 15%', v: '탈락', dev: D1(4.2, -15), note: '손실은 줄었지만 8.4%p 뒤짐' },
+      { id: 'X03', name: '순위 + 목표 변동성', approach: 'C10 + 변동성 12% 넘으면 비중 줄임', v: '탈락', dev: D1(2.8, -21), note: '9.8%p 뒤짐' },
+      { id: 'X01', name: '순위 + 200일선', approach: 'C08 + S&P가 200일선 아래면 단기채', v: '탈락', dev: D1(2.6, -23), note: '10%p 뒤짐' },
+      { id: 'R01', name: '12개월 강한 3개', approach: '모델 없이 최근 12개월(마지막 1개월 뺌) 수익 상위 ETF 3개 · 월 1회', v: '탈락', dev: D1(5.5, -23), note: '7.1%p 뒤짐' },
+      { id: 'R03', name: '듀얼 모멘텀', approach: '미국·선진국 중 강한 쪽, 현금보다 약하면 채권', v: '탈락', dev: D1(4.8, -24), note: '7.8%p 뒤지고 손실 더 큼' },
+      { id: 'R02', name: '강한 3개 + 200일선', approach: 'R01 + S&P가 200일선 아래면 단기채', v: '탈락', dev: D1(3.7, -25), note: '덜 잃지도 않음' },
+      { id: 'S01', name: '주 스윙 릿지', approach: '단기 반전·추세 특성 릿지로 다음 주 강한 3개 · 매주 교체', v: '탈락', dev: D1(1.3, -27), note: '매매 2,185회, 비용에 다 먹힘' },
+      { id: 'S02', name: '주 스윙 + 지표', approach: 'S01 + 불안·신용·뉴스 지표, 부스팅', v: '탈락', dev: D1(-0.8, -30), note: '매매 2,191회' },
+      { id: 'S03', name: '주 스윙 신경망', approach: 'S02를 신경망으로', v: '탈락', dev: D1(-2.4, -38), note: '매매 2,202회' },
+      { id: 'S04', name: '주 스윙 평균 + 200일선', approach: '세 모델 평균 + 200일선 아래면 단기채', v: '탈락', dev: D1(-6.7, -49), note: '최악 −49%' },
     ],
   },
 ];
-
-export function verdictOf(r: Round, id: string): { v: Verdict; why: string } | null {
-  const x = r.verdicts.find((v) => v.ids.includes(id));
-  return x ? { v: x.v, why: x.why } : null;
-}
-
-export function roundIds(r: Round): string[] {
-  return r.verdicts.flatMap((v) => v.ids);
-}
-
-const ORDER: Record<Verdict, number> = { 후보: 0, 보류: 1, 탈락: 2 };
-/** 후보 → 보류 → 탈락 순, 같으면 점수(S&P 대비 차이) 큰 순 */
-export function sortCards<T extends { id: string; v: Verdict | null; gap: number | null }>(xs: T[]): T[] {
-  return [...xs].sort((a, b) => (ORDER[a.v ?? '탈락'] - ORDER[b.v ?? '탈락']) || ((b.gap ?? -99) - (a.gap ?? -99)) || a.id.localeCompare(b.id));
-}
-
-/** 실험 기록(experiments) 한 줄: 전략·구간별 마지막 실행만. 숫자는 비율(0.103 = 10.3%). */
-export type LabRow = {
-  id: string; hypothesis: string; period: 'dev' | 'valid'; plan: number | null; at: string;
-  ret: number | null; benchRet: number | null; liq: boolean;   // liq=true면 청산 세후(2차~), 아니면 세금 전 연수익(1차)
-  mdd: number | null; benchMdd: number | null; down: number | null; trades: number | null;
-  hit: number | null; base: number | null; ic: number | null;
-};
-
-const n = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : typeof v === 'string' && v !== '' && Number.isFinite(Number(v)) ? Number(v) : null);
-
-export function toRow(r: { strategy: string; hypothesis?: string; period: string; plan: string | null; at: string; m: Record<string, unknown> }): LabRow {
-  const m = r.m ?? {};
-  const liq = m.liq_cagr !== undefined;
-  return {
-    id: r.strategy, hypothesis: r.hypothesis ?? '', period: r.period === 'valid' ? 'valid' : 'dev', plan: r.plan ? Number(r.plan) : null, at: r.at,
-    ret: n(liq ? m.liq_cagr : m.cagr), benchRet: n(liq ? m.bench_liq_cagr : m.bench_cagr), liq,
-    mdd: n(m.mdd), benchMdd: n(m.bench_mdd), down: n(m.down_capture), trades: n(m.trades),
-    hit: n(m.ic_hit ?? m.hit), base: n(m.ic_base_rate ?? m.base_rate), ic: n(m.ic_ic_mean ?? m.ic_mean),
-  };
-}
-
