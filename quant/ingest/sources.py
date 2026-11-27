@@ -48,6 +48,7 @@ def tiingo_daily(fetch: Fetch, ticker: str, start: date, end: date, token: str) 
 
 
 # ---------------------------------------------------------------- 매크로·VIX: FRED
+FRED_WEEKLY_RELEASE = {"DTWEXBGS", "DEXKOUS"}  # 일별 값이지만 H.10 보고서로 주 1회 묶어 발표
 FRED_DAILY = {"VIXCLS", "VXVCLS", "DEXKOUS", "DGS10", "DGS2", "T10Y2Y", "T10Y3M", "DFF", "BAMLH0A0HYM2",
               "USEPUINDXD", "WLEMUINDXD", "DTWEXBGS", "DCOILWTICO", "T5YIE", "DFII10", "BAMLC0A0CM", "BAA10Y"}
 
@@ -56,8 +57,10 @@ def fred_series(fetch: Fetch, series: str, start: date, api_key: str) -> list[di
     """release_date = 그 값이 처음 공개된 날. 백테스트는 이 날짜 이후에만 쓴다.
 
     ALFRED '처음 발표된 값만'(output_type=4)으로 받아 정정 전 값과 첫 발표일을 쓴다.
-    빈티지 기록이 없는 시리즈는 realtime_start가 실제 발표일이 아니라(수년 뒤) → 일간 시리즈는 다음 날,
-    그 밖은 35일 뒤로 보수적으로 둔다.
+    발표 기록(빈티지)이 시작되기 전 값은 realtime_start가 기록 시작일(수년 뒤)이다 → 그대로 둔다.
+    즉 '그날 전에는 몰랐던 값'으로 남긴다. (예전엔 기준일+35일로 바꿔 넣어, 나중에 다시 계산된 값이
+    당시에 알던 값처럼 들어갔다 — Fable 판정 #57에서 발견한 누수)
+    일간 시장 시리즈는 빈티지가 너무 많아 다음 날 공개로, 주 1회 묶어 발표되는 것(달러지수·원/달러)은 7일 뒤로 본다.
     """
     params = {"series_id": series, "observation_start": start.isoformat(), "api_key": api_key, "file_type": "json"}
     daily = series in FRED_DAILY
@@ -65,7 +68,7 @@ def fred_series(fetch: Fetch, series: str, start: date, api_key: str) -> list[di
         # 일간 시장 시리즈는 빈티지가 수천 개라 FRED가 거절(최대 2,000) → 다음 날 발표로 보고 첫 발표값 조회는 월간·주간만
         params.update({"realtime_start": "1776-07-04", "realtime_end": "9999-12-31", "output_type": 4})
     data = get_json(fetch, "https://api.stlouisfed.org/fred/series/observations", params, source="fred")
-    lag = timedelta(days=1 if daily else 35)
+    lag = timedelta(days=7 if series in FRED_WEEKLY_RELEASE else 1 if daily else 35)
     rows = []
     for o in data.get("observations", []):
         v = _num(o.get("value"))
@@ -73,7 +76,7 @@ def fred_series(fetch: Fetch, series: str, start: date, api_key: str) -> list[di
             continue
         ref = date.fromisoformat(o["date"])
         rel = date.fromisoformat(o.get("realtime_start") or o["date"])
-        if daily or rel < ref or (rel - ref).days > 60:
+        if daily or rel < ref:  # 일간은 다음 날(또는 주간 발표 7일), 기록이 이상하면(발표일 < 기준일) 보수적으로
             rel = ref + lag
         rows.append({"series": series, "ref_date": o["date"], "release_date": rel.isoformat(), "value": v, "source": "fred"})
     return rows
