@@ -19,6 +19,9 @@ test('화면 실험 목록 = 코드 실험 목록(1차 30개·2차 11개, 하나
   const r5 = ROUNDS.find((r) => r.round === 5).exps.map((e) => e.id).sort();
   const ids5 = [...src5.slice(src5.indexOf('ROUND5: list[E5]'), src5.indexOf('BENCH5')).matchAll(/E5\("(R5_[A-Z]\d)"/g)].map((m) => m[1]).sort();
   assert.deepEqual(r5, ids5);
+  const src6 = readFileSync('quant/forecast/round6.py', 'utf8');
+  const ids6 = [...src6.slice(src6.indexOf('ROUND6: list[E6]'), src6.indexOf('BENCH6')).matchAll(/E6\("(R6_[A-Z]\d)"/g)].map((m) => m[1]).sort();
+  assert.deepEqual(ROUNDS.find((r) => r.round === 6).exps.map((e) => e.id).sort(), ids6);
 });
 
 test('실험마다 한 줄 요약·접근·결과가 다 있다', () => {
