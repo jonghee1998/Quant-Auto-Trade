@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { ROUNDS } from '../lib/labRounds.ts';
 
-const idsIn = (src, from, to) => [...src.slice(src.indexOf(from), src.indexOf(to)).matchAll(/Exp\("([A-Z]\d\d)"/g)].map((m) => m[1]).sort();
+const idsIn = (src, from, to) => [...src.slice(src.indexOf(from), src.indexOf(to)).matchAll(/Exp\("((?:R4_)?[A-Z]\d+[a-z]?)"/g)].map((m) => m[1]).sort();
 const src = readFileSync('quant/forecast/experiments.py', 'utf8');
 
 test('화면 실험 목록 = 코드 실험 목록(1차 30개·2차 11개, 하나씩 다 있음)', () => {
@@ -13,6 +13,8 @@ test('화면 실험 목록 = 코드 실험 목록(1차 30개·2차 11개, 하나
   assert.deepEqual(r2, idsIn(src, 'ROUND2: list[Exp]', 'BENCHMARKS'));
   const r3 = ROUNDS.find((r) => r.round === 3).exps.map((e) => e.id).sort();
   assert.deepEqual(r3, idsIn(src, 'ROUND3: list[Exp]', 'BENCHMARKS3'));
+  const r4 = ROUNDS.find((r) => r.round === 4).exps.map((e) => e.id).sort();
+  assert.deepEqual(r4, idsIn(src, 'ROUND4: list[Exp]', 'BENCHMARKS4'));
 });
 
 test('실험마다 한 줄 요약·접근·결과가 다 있다', () => {
