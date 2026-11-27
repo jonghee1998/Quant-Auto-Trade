@@ -380,3 +380,12 @@ def test_kr_etf_history_keeps_only_plain_sp500_names():
         return Response(200, json.dumps({"response": {"body": {"totalCount": 5, "items": {"item": items}}}}))
     rows = S.kr_etf_history(fetch, date(2021, 1, 1), date(2021, 12, 31), "TESTKEY")
     assert sorted(r["code"] for r in rows) == ["TEST01", "TEST02", "TEST03"]
+
+
+def test_plan_fetches_history_funds_only_on_long_backfill_and_first():
+    from quant.ingest import universe as U
+    from quant.ingest.run import plan
+    daily = [d for s, d, _, _ in plan({"TIINGO_TOKEN": "FAKE"}, date(2024, 1, 5), 5) if s == "tiingo"]
+    assert not set(U.US_HISTORY) & set(daily) and len(daily) <= 50          # 매일 수집은 시간당 한도(50건) 안
+    long = [d for s, d, _, _ in plan({"TIINGO_TOKEN": "FAKE"}, date(2024, 1, 5), 400) if s == "tiingo"]
+    assert long[:len(U.US_HISTORY)] == U.US_HISTORY
