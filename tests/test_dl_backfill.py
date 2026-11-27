@@ -74,3 +74,17 @@ def test_backfill_batches_records_missing_and_stops_on_rate_limit():
     assert all(t in man for t in sample[:stop])
     cov = out["coverage"]
     assert cov["gone"] >= 1 and 0 <= cov["share"] <= 1
+
+
+def test_dotted_ticker_uses_dash_for_tiingo():
+    seen = []
+
+    def fetch(url, params=None, headers=None):
+        if "raw.githubusercontent" in url:
+            return Response(200, "ticker,start_date,end_date\nTEST.B,2000-01-03,\n")
+        seen.append(url.split("/daily/")[1].split("/")[0])
+        return Response(200, json.dumps([{"date": "2003-01-02T00:00:00", "close": 10, "adjClose": 10}]))
+    r2 = FakeR2()
+    r2.put_json("manifest.json", {"TEST.B": {"first": None, "last": None, "rows": 0}})
+    B.run(r2, fetch, "FAKE", n=5, batch=5, log=lambda s: None)
+    assert seen == ["test-b"] and json.loads(r2.d["manifest.json"])["TEST.B"]["rows"] == 1
