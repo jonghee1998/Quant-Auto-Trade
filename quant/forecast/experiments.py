@@ -14,8 +14,8 @@ from .rules import (SECTORS, Banded, BandedMix, FixedMix, GrowthTrend, HarvestOv
 from .strategy import ForecastRanker, MarketTimer
 
 # 이 실험 묶음을 설계한 Fable 계획 Issue 번호(라벨 lab:fable-plan). lab-forecast는 이게 없으면 돌지 않는다.
-# 1차(30개)는 Fable 설계 없이 만들어졌다(실수). 2차 #59, 3차 #66, 4차 #73, 5차 #79(가계 모형 — quant/forecast/round5.py).
-PLAN_ISSUE: int | None = 79
+# 1차(30개)는 Fable 설계 없이 만들어졌다(실수). 2차 #59, 3차 #66, 4차 #73, 5차 #79(가계 모형 — quant/forecast/round5.py), 6차 #85(round6.py).
+PLAN_ISSUE: int | None = 85
 
 UNIVERSE = ["SPY", "QQQ", "IWM", "DIA", "XLK", "XLF", "XLE", "XLV", "XLY", "XLP", "XLI", "XLU", "XLB", "XLRE", "XLC",
             "SOXX", "EFA", "EEM", "EWJ", "VGK", "EWY", "EWT", "EWZ", "MCHI", "INDA", "TLT", "IEF", "GLD", "VNQ"]
