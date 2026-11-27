@@ -1,6 +1,7 @@
 name: lab-forecast
 # 실험실 1차: 예측 기반 30개(quant/forecast/experiments.py)를 DB 데이터로 돌리고 experiments 표에 기록한다.
 # AI가 아니라 코드만 실행한다. 홀드아웃(2023~)은 여기서 돌리지 않는다.
+# 실험실의 처음(설계)과 끝(판정)은 Fable: 설계 Issue(lab:fable-plan) 없으면 멈추고, 끝나면 lab-fable이 자동 판정한다.
 run-name: "lab-forecast ${{ inputs.period }} ${{ inputs.ids }}"
 on:
   workflow_dispatch:
@@ -9,6 +10,7 @@ on:
       ids: { description: '실험 고르기(쉼표, 빈칸=30개 전부)', default: '' }
 permissions:
   contents: read
+  issues: read
 concurrency:
   group: lab-run
   cancel-in-progress: false
@@ -23,6 +25,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Fable 설계 확인(없으면 멈춤)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          n=$(python3 -c "import ast,sys;t=ast.parse(open('quant/forecast/experiments.py').read());print(next((ast.literal_eval(s.value) for s in t.body if isinstance(s,ast.AnnAssign) and getattr(s.target,'id','')=='PLAN_ISSUE'),None))")
+          if [ "$n" = "None" ] || [ -z "$n" ]; then echo "::error::Fable 설계 Issue(PLAN_ISSUE)가 없다 — lab-fable(design)로 계획부터"; exit 1; fi
+          labels=$(gh api "repos/$GITHUB_REPOSITORY/issues/$n" --jq '[.labels[].name]|join(",")')
+          case ",$labels," in *",lab:fable-plan,"*) echo "설계 Issue #$n 확인";; *) echo "::error::#$n 에 lab:fable-plan 라벨이 없다"; exit 1;; esac
       - run: python -m pip install -q -r requirements.txt
       - name: Run
         env:
