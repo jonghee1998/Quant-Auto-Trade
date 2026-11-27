@@ -6,7 +6,7 @@
 | Secret 이름 | 소스 | 받는 데이터 | 무료 한도 |
 |---|---|---|---|
 | `DATABASE_URL` | Neon Postgres | 저장소(없으면 건수만 확인) | 무료 플랜 |
-| `TIINGO_TOKEN` | Tiingo | 미국 ETF 일봉·수정주가 | 시간당 50, 하루 1,000 |
+| `TIINGO_TOKEN` | Tiingo | 미국 ETF 일봉·수정주가, 긴 과거용 펀드(VFINX·VWIGX·VEIEX·FRESX·VFITX·VUSTX — 실험실 관문) | 시간당 50, 하루 1,000 |
 | `FRED_API_KEY` | FRED | VIX, 원/달러, 금리, 물가, 실업률(발표일 포함) | 넉넉함 |
 | `DATA_GO_KR_KEY` | 공공데이터포털(금융위원회 주식·증권상품 시세) | 한국 주식·ETF 일봉 전 종목(T+1 13시) | 개발 하루 10,000 |
 | (키 없음) | 구글 뉴스 RSS — 한국 헤드라인 기본. 제목·언론사·시각만, 공식 API 아님 | 한국 시장 뉴스(홈) | 질의 4개/일 |
