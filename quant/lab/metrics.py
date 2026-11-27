@@ -108,6 +108,30 @@ def deflated_sharpe(nav: pd.Series, n_trials: int, trial_sharpe_var: float | Non
     return float(nd.cdf((sr - sr0) * math.sqrt(t - 1) / denom))
 
 
+def deflated_sharpe_excess(nav: pd.Series, bench: pd.Series, n_trials: int, trial_var: float | None = None) -> float:
+    """S&P 대비 DSR: 날마다 (전략 수익 − S&P 수익)으로 계산(Fable 판정 #57 — 0 대비가 아니라 S&P 대비)."""
+    ex = (nav.pct_change(fill_method=None) - bench.pct_change(fill_method=None)).dropna()
+    return deflated_sharpe((1 + ex).cumprod(), n_trials, trial_var)
+
+
+def excess_sharpe(nav: pd.Series, bench: pd.Series) -> float:
+    """일 단위 (전략 − S&P) 수익의 평균 ÷ 표준편차. 묶음 전체 분산 계산용."""
+    ex = (nav.pct_change(fill_method=None) - bench.pct_change(fill_method=None)).dropna()
+    return float(ex.mean() / ex.std()) if len(ex) > 2 and ex.std() > 0 else float("nan")
+
+
+def liquidated_cagr(after_tax: float, capital: float, nav: pd.Series) -> float:
+    """마지막 날 다 팔고 세금까지 낸 금액 기준 연수익."""
+    years = (nav.index[-1] - nav.index[0]).days / 365.25
+    return float((after_tax / capital) ** (1 / years) - 1) if years > 0 and after_tax > 0 else float("nan")
+
+
+def drawdown_in(nav: pd.Series, start: str, end: str) -> float:
+    """한 구간 안 최악 손실(구간 시작 직전 고점 기준이 아니라 구간 안에서만)."""
+    s = nav.loc[start:end]
+    return float((s / s.cummax() - 1).min()) if len(s) > 1 else float("nan")
+
+
 def summary(nav: pd.Series, bench: pd.Series) -> dict:
     return {
         "cagr": cagr(nav),

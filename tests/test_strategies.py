@@ -30,7 +30,7 @@ def test_registry_strategies_run_and_card():
     fx = pd.Series(1300.0, index=p.index)
     sp = Splits(dev=("2015-01-01", "2016-12-31"), valid=("2017-01-01", "2017-12-31"), holdout=("2018-01-01", None))
     for name, (make, hyp, params) in REGISTRY.items():
-        m = evaluate(p, fx, make(), hypothesis=hyp, params=params, period="dev", splits=sp, costs=Costs(fee=0, fx_spread=0))
+        m = evaluate(p, fx, make(), hypothesis=hyp, params=params, period="dev", splits=sp, costs=Costs(fee=0, fx_spread=0, slippage=0))
         assert m["cagr"] == m["cagr"]
         text = card(name, "dev", m)
         assert "S&P 그냥 보유" in text and "nan" not in text.lower()

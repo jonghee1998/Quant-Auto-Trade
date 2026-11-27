@@ -52,3 +52,13 @@ gh workflow run lab-forecast.yml -f period=dev            # 30개
 gh workflow run lab-forecast.yml -f period=valid -f ids=C10,X04,...
 ```
 결과: 작업 요약(표)과 artifact `lab-forecast-<period>`(JSON).
+
+## 2차 (Fable 설계 #59)
+
+- 실험 11개: A01~A04(변동성 맞추기·200일선, SPY/SHY), L01·L02(SSO로 1.5배까지), T07·T08(사후 수정 없는 시장 지표 7개만 쓴 타이밍, T08은 주 1회 + 25%p 띠), K01~K03(업종 11개 상위 3·5위 안 유지, K02 릿지 순위, K03 SPY 70% 고정). 기준선 B00(SPY)·B80·B60·BEQ.
+- 코드: 규칙은 `quant/forecast/rules.py`, 목록은 `quant/forecast/experiments.py`의 `ROUND2`·`BENCHMARKS`(`PLAN_ISSUE = 59`). 1차 30개는 `ROUND1`(기록용, `--round 1`로만).
+- 측정 도구: 슬리피지 편도 0.03%·비용 배수, 같은 날 팔고 사는 달러는 순액만 환전, 배당세 15%(수정계수 변화로 배당률 계산, 하루 5% 넘는 조정은 분할로 보고 버림), 연말 세금이 모자라면 보유분 비례 매도, `None` = 그대로 둠.
+- 실행: 네 조건(1억·1천만 × 비용 1·2배), 기준 조건 1억·1배. 연수익은 청산 세후로 비교. DSR은 'S&P 대비' 일수익, 시도 수 48(이전 37 + 11), 분산은 묶음을 다 돌린 뒤. 점수 = 청산 세후 차이 + 0.5 × 최악 손실 개선.
+- 검증 자격은 계획 규칙대로 코드가 자동으로 정한다(`run.eligibility`, 최대 2개·묶음마다 1개). 검증에서는 세 하락(2018 Q4·2020 봄·2022)과 A·L 묶음의 2005~2009 스트레스 구간을 같이 보고한다.
+- 거시 지표 사후 수정: 계획의 1번(`release_estimated` 표시)은 #58에서 다른 방법으로 이미 고쳤다 — ALFRED 첫 기록 이전 값은 기준일+35일로 바꾸지 않고 FRED `realtime_start`를 발표일로 둔다(migration 0006). T07·T08은 어차피 사후 수정 없는 지표만 쓴다.
+- 결과물(artifact): `forecast-<구간>.md`·`.json`(코드 버전·데이터 날짜·특성별 첫 사용 날짜·조건별 결과·자격), 실험별 `daily-<구간>-<id>.csv`(평가액·S&P·주식 노출).

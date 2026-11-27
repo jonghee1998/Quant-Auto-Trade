@@ -9,11 +9,12 @@ from typing import Callable
 
 import pandas as pd
 
+from .rules import SECTORS, Banded, FixedMix, RankHold, SectorHold, TrendState, TrendSwitch, VolTarget
 from .strategy import ForecastRanker, MarketTimer
 
 # 이 실험 묶음을 설계한 Fable 계획 Issue 번호(라벨 lab:fable-plan). lab-forecast는 이게 없으면 돌지 않는다.
-# 1차(30개)는 Fable 설계 없이 만들어졌다(실수) → None. 2차부터 Fable 계획대로 만들고 번호를 적는다.
-PLAN_ISSUE: int | None = None
+# 1차(30개)는 Fable 설계 없이 만들어졌다(실수). 2차(아래 ROUND2)는 Fable 설계 #59 그대로.
+PLAN_ISSUE: int | None = 59
 
 UNIVERSE = ["SPY", "QQQ", "IWM", "DIA", "XLK", "XLF", "XLE", "XLV", "XLY", "XLP", "XLI", "XLU", "XLB", "XLRE", "XLC",
             "SOXX", "EFA", "EEM", "EWJ", "VGK", "EWY", "EWT", "EWZ", "MCHI", "INDA", "TLT", "IEF", "GLD", "VNQ"]
@@ -72,7 +73,7 @@ def _combo(id_, timer_kw, **kw):
     return lambda px, mf: ForecastRanker(id_, px, mf, UNIVERSE, regime="timer", timer=MarketTimer(id_ + "_timer", px, mf, **timer_kw), **kw)
 
 
-EXPERIMENTS: list[Exp] = [
+ROUND1: list[Exp] = [
     # 규칙 기준선(모델 없이도 되는지 먼저)
     Exp("R01", "규칙", "12-1개월 수익 상위 3개 ETF를 매달 들면 S&P보다 낫다", lambda px, mf: RuleMomentum("R01", px)),
     Exp("R02", "규칙", "R01 + S&P가 200일선 아래면 단기채로 피하면 덜 잃는다", lambda px, mf: RuleMomentum("R02", px, trend=True)),
@@ -110,6 +111,51 @@ EXPERIMENTS: list[Exp] = [
         _combo("X04", {"model": "logit", "feats": "PMN", "mode": "scaled"}, feats="PMN", model="ens", top=5, weighting="invvol", vol_target=0.15)),
     Exp("X05", "조합", "C10을 최근 8년 창으로만 학습하면(옛 시장을 잊음) 더 안정적이다", _r("X05", feats="PMN", model="ens", train_years=8)),
 ]
-assert len(EXPERIMENTS) == 30 and len({e.id for e in EXPERIMENTS}) == 30
+assert len(ROUND1) == 30 and len({e.id for e in ROUND1}) == 30
 MACRO_SERIES = ["VIXCLS", "VXVCLS", "BAA10Y", "BAMLH0A0HYM2", "BAMLC0A0CM", "T10Y2Y", "T10Y3M", "DGS10", "DFII10", "T5YIE", "DTWEXBGS",
                 "DCOILWTICO", "NFCI", "STLFSI4", "ICSA", "SAHMREALTIME", "UMCSENT", "USEPUINDXD", "WLEMUINDXD", "DEXKOUS"]
+
+
+# ── 2차(Fable 설계 #59) ── 조절값은 계획에 적힌 그대로 고정. 바꾸면 새 id(시도 +1).
+# T07·T08: 사후 수정이 없는 시장 지표 7개만(NFCI·금융 스트레스·샴·실업수당·소비자심리·달러·원/달러·뉴스 지수 제외).
+CLEAN_MARKET = ["vix", "vix_term", "baa", "baa_ch21", "curve_2y", "curve_3m", "dgs10_ch21"]
+T07_KW = {"model": "logit", "feats": "PM", "mode": "scaled", "h": 21, "refit_months": 3, "step": 5, "cols": CLEAN_MARKET}
+
+
+def _k_ranker(px, mf, id_):
+    return ForecastRanker(id_, px, mf, SECTORS, feats="P", model="ridge", h=21, refit_months=3, top=3)
+
+
+ROUND2: list[Exp] = [
+    Exp("A01", "A", "변동성이 높을 때 주식 비중을 줄이면 최악 손실이 S&P의 80% 이하, 세후 연수익은 0.5%p 넘게 안 뒤진다",
+        lambda px, mf: VolTarget("A01", target=0.15, cap=1.0, band=0.10), "W"),
+    Exp("A02", "A", "월말 S&P가 200일선 아래면 SHY로 피하면 최악 손실이 S&P의 80% 이하",
+        lambda px, mf: TrendSwitch("A02", band=0.0), "M"),
+    Exp("A03", "A", "같은 규칙을 주 1회 + ±2% 띠로 보면 A02보다 최악 손실이 작고 매매는 2배 이하",
+        lambda px, mf: TrendSwitch("A03", band=0.02), "W"),
+    Exp("A04", "A", "변동성 규칙 + 200일선 규칙을 합치면 각각보다 최악 손실이 작다",
+        lambda px, mf: VolTarget("A04", target=0.15, cap=1.0, band=0.10, trend=TrendState(band=0.02)), "W"),
+    Exp("L01", "L", "변동성 낮을 때 노출을 1.5배까지(SSO) 늘리면 세후 연수익 > S&P, 최악 손실 ≤ S&P",
+        lambda px, mf: VolTarget("L01", target=0.15, cap=1.5, band=0.10), "W"),
+    Exp("L02", "L", "L01 + 200일선 상태(피함이면 전부 SHY)면 최악 손실이 L01보다 작다",
+        lambda px, mf: VolTarget("L02", target=0.15, cap=1.5, band=0.10, trend=TrendState(band=0.02)), "W"),
+    Exp("T07", "T", "사후 수정 없는 시장 지표만으로도 확률 모델이 내린 달 빠짐 0.8 미만",
+        lambda px, mf: MarketTimer("T07", px, mf, **T07_KW), "M"),
+    Exp("T08", "T", "T07을 주 1회 보고 25%p 넘게 바뀔 때만 매매하면 최악 손실이 작고 비용 2배에서도 안 뒤진다",
+        lambda px, mf: Banded("T08", MarketTimer("T08_timer", px, mf, **T07_KW), band=0.25), "W"),
+    Exp("K01", "K", "업종 11개 12-1개월 상위 3, 5위 밖일 때만 교체하면 11개 똑같이보다 세후 연수익이 높다",
+        lambda px, mf: SectorHold("K01", top=3, keep=5), "M"),
+    Exp("K02", "K", "같은 11개에서 릿지 순위 예측이 K01보다 세후 연수익이 높고 IC t ≥ 2",
+        lambda px, mf: RankHold("K02", _k_ranker(px, mf, "K02_rank"), top=3, keep=5), "M"),
+    Exp("K03", "K", "S&P 70% + K02 상위 3개 30%면 S&P에 0.5%p 넘게 안 뒤지면서 세후 연수익이 높다",
+        lambda px, mf: RankHold("K03", _k_ranker(px, mf, "K03_rank"), top=3, keep=5, core=0.7, band=0.05), "M"),
+]
+# 기준선(자): 시도 수에 세지 않고 검증에 올리지 않는다. B00은 엔진 기본 기준선(SPY 그냥 보유)과 같다.
+BENCHMARKS: list[Exp] = [
+    Exp("B80", "기준선", "SPY 80%·SHY 20%(해마다 맞춤)", lambda px, mf: FixedMix("B80", {"SPY": 0.8, "SHY": 0.2}), "M"),
+    Exp("B60", "기준선", "SPY 60%·SHY 40%(해마다 맞춤)", lambda px, mf: FixedMix("B60", {"SPY": 0.6, "SHY": 0.4}), "M"),
+    Exp("BEQ", "기준선", "업종 11개 똑같이(해마다 맞춤)", lambda px, mf: FixedMix("BEQ"), "M"),
+]
+PREV_TRIALS = 37   # 이전까지 누적 시도(계획 #59) → 개발 DSR 시도 수 = 37 + 11 = 48
+EXPERIMENTS = ROUND2   # 기본 실행 대상(1차는 기록용, --round 1 로만)
+assert len(ROUND2) == 11 and len({e.id for e in ROUND2 + BENCHMARKS}) == 14
