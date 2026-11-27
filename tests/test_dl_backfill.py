@@ -88,3 +88,37 @@ def test_dotted_ticker_uses_dash_for_tiingo():
     r2.put_json("manifest.json", {"TEST.B": {"first": None, "last": None, "rows": 0}})
     B.run(r2, fetch, "FAKE", n=5, batch=5, log=lambda s: None)
     assert seen == ["test-b"] and json.loads(r2.d["manifest.json"])["TEST.B"]["rows"] == 1
+
+
+def _zip(text):
+    import io
+    import zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("supported_tickers.csv", text)
+    return buf.getvalue()
+
+
+def test_probe_classifies_missing_tickers_against_tiingo_list():
+    from quant.dl import probe as P
+    listed = ("ticker,exchange,assetType,priceCurrency,startDate,endDate\n"
+              "TEST02,NYSE,Stock,USD,1999-01-04,2010-06-18\n"      # 목록에는 있고 기간도 덮음 → A
+              "TEST03,NYSE,Stock,USD,2015-03-23,2022-12-30\n"      # 같은 기호의 뒤 기간만 → B
+              "TEST05,NYSE,ETF,USD,2019-01-02,2022-12-30\n")       # 주식이 아님 → 없는 것으로
+
+    def fetch(url, params=None, headers=None):
+        if "raw.githubusercontent" in url:
+            return Response(200, CSV)
+        return Response(200, "", _zip(listed))
+    r2 = FakeR2()
+    r2.put_json("manifest.json", {"TEST01": {"first": "2003-01-02", "last": "2022-12-30", "rows": 5000},
+                                  "TEST02": {"first": None, "last": None, "rows": 0}, "TEST03": {"first": "2015-03-23", "last": "2022-12-30", "rows": 1900},
+                                  "TEST05": {"first": None, "last": None, "rows": 0}})
+    sp = M.parse(CSV)
+    r = P.classify(sp, r2.get_json("manifest.json"), M.sample(sp, 10), P.supported(fetch))
+    assert (r["done"], r["covered"], r["gone"], r["gone_covered"]) == (4, 1, 2, 0)
+    assert r["classes"] == {"A": 1, "B": 1, "C": 1}
+    assert {x["ticker"]: x["class"] for x in r["rows"]} == {"TEST02": "A", "TEST03": "B", "TEST05": "C"}
+    assert r["best_if_A_fixed"] == {"share": 0.5, "gone_share": 0.5} and r["gate_possible"] is False
+    md = P.run(r2, fetch, 10)
+    assert "A 목록에 있고 기간도 덮음" in md and "| TEST02 | 예 |" in md and "관문 불가" in md
