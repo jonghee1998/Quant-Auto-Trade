@@ -11,7 +11,7 @@
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 import pandas as pd
@@ -27,10 +27,14 @@ class Costs:
     tax_deduction_krw: float = 2_500_000.0  # 연 기본공제(원)
     slippage: float = 0.0003     # 편도 호가 차이(체결 금액 대비)
     dividend_tax: float = 0.15   # 미국 배당 원천징수
+    # 4차(계획 #73) 계좌 모형 — 세법 숫자는 사람 확인 필요
+    domestic_tax: float = 0.154        # 국내 일반계좌: 팔 때마다 이익의 15.4%, 손실 상계·공제 없음(원화 자산에도 적용)
+    deferred_tax: float = 0.099        # 절세계좌형(이연): 다 팔 때 (순이익 − 공제) × 9.9%
+    deferred_deduction: float = 2_000_000.0
 
     def scaled(self, k: float) -> "Costs":
         """비용 k배(수수료·환전·슬리피지). 세금은 그대로."""
-        return Costs(self.fee * k, self.fx_spread * k, self.tax_rate, self.tax_deduction_krw, self.slippage * k, self.dividend_tax)
+        return replace(self, fee=self.fee * k, fx_spread=self.fx_spread * k, slippage=self.slippage * k)
 
 
 @dataclass
@@ -44,15 +48,28 @@ class BacktestResult:
     liq_nav: pd.Series | None = None     # 날짜별 '그날 다 팔고 세금까지 내면 남는 돈'(3차, 계획 #66)
 
 
-def _liquidation_value(cash: float, shares: dict, basis: dict, realized_year: float, px, rate: float, costs: "Costs") -> float:
-    """그날 종가에 전부 팔고(매도 비용·환전) 올해 실현이익 + 미실현이익에 양도세까지 낸 뒤 남는 원화."""
+ACCOUNTS = ("foreign", "domestic", "deferred")
+
+
+def _liquidation_value(cash: float, shares: dict, basis: dict, realized_year: float, px, rate: float, costs: "Costs",
+                       krw: frozenset = frozenset(), account: str = "foreign", capital: float = 0.0) -> float:
+    """그날 종가에 전부 팔고(매도 비용·환전) 세금까지 낸 뒤 남는 원화.
+    foreign: 달러 자산은 올해 실현 + 미실현 합에서 공제 뒤 22%, 원화 자산은 이익마다 15.4%.
+    domestic: 종목마다 이익의 15.4%(손실 상계 없음). deferred: 전체 순이익(− 처음 넣은 돈)에서 공제 뒤 9.9%."""
     trade_cost = costs.fee + costs.slippage
-    gain, out = realized_year, cash
+    gain, out, imm = realized_year, cash, 0.0
     for t, q in shares.items():
-        net = q * float(px[t]) * rate * (1 - trade_cost) * (1 - costs.fx_spread)
-        gain += net - basis[t]
+        k = t in krw
+        net = q * float(px[t]) * (1.0 if k else rate) * (1 - trade_cost) * (1.0 if k else 1 - costs.fx_spread)
         out += net
-    return out - max(0.0, gain - costs.tax_deduction_krw) * costs.tax_rate
+        if account == "domestic" or (account == "foreign" and k):
+            imm += max(0.0, net - basis[t]) * costs.domestic_tax
+        elif account == "foreign":
+            gain += net - basis[t]
+    if account == "deferred":
+        return out - max(0.0, out - capital - costs.deferred_deduction) * costs.deferred_tax
+    pooled = max(0.0, gain - costs.tax_deduction_krw) * costs.tax_rate if account == "foreign" else 0.0
+    return out - pooled - imm
 
 
 def _check_inputs(prices: pd.DataFrame, fx: pd.Series) -> pd.Series:
@@ -84,9 +101,16 @@ def run_backtest(
     rebalance: str = "M",
     costs: Costs = Costs(),
     div_yield: pd.DataFrame | None = None,
+    krw_assets: frozenset | set = frozenset(),
+    account: str = "foreign",
 ) -> BacktestResult:
     """start~end 구간을 돌린다. 신호 계산에는 start 이전 가격도 history 로 쓸 수 있다.
-    div_yield: 날짜×종목 배당률(배당락일에만 값). 수정종가가 배당을 이미 담고 있으므로 세금만 현금에서 뺀다."""
+    div_yield: 날짜×종목 배당률(배당락일에만 값). 수정종가가 배당을 이미 담고 있으므로 세금만 현금에서 뺀다.
+    krw_assets: 원화로 값이 매겨진 자산(국내 상장 ETF 합성 시세·원화 현금) — 환율·환전 비용 없음.
+    account: foreign(해외 직접, 기본·이전과 같음) / domestic(국내 일반: 팔 때마다 15.4%) / deferred(절세계좌형: 다 팔 때 9.9%)."""
+    if account not in ACCOUNTS:
+        raise ValueError(f"알 수 없는 계좌 모형: {account}")
+    krw = frozenset(krw_assets)
     fx = _check_inputs(prices, fx)
     mask = prices.index >= pd.Timestamp(start)
     if end is not None:
@@ -117,17 +141,19 @@ def run_backtest(
     for i, d in enumerate(idx):
         px = prices.loc[d]
         rate = float(fx.loc[d])
+        R = lambda t: 1.0 if t in krw else rate  # noqa: E731
+        imm = account == "domestic"
         # 배당세: 배당락일에 그 전날 종가 보유액 × 배당률 × 세율(원화)
         if div_yield is not None and shares and i > 0 and d in div_yield.index:
             prev = prices.loc[idx[i - 1]]
             for t, q in shares.items():
                 y = div_yield.at[d, t] if t in div_yield.columns else 0.0
                 if y and y > 0:
-                    tax = q * float(prev[t]) * rate * y * costs.dividend_tax
+                    tax = q * float(prev[t]) * R(t) * y * costs.dividend_tax
                     cash -= tax
                     div_tax_total += tax
         if pending is not None:
-            value = cash + sum(q * float(px[t]) * rate for t, q in shares.items())
+            value = cash + sum(q * float(px[t]) * R(t) for t, q in shares.items())
             target_val = {t: w * value for t, w in pending.items() if w > 0}
             usd_sold = usd_bought = 0.0
             # 1) 팔기: 목표보다 많이 가진 만큼(환전 전 달러로 받는다)
@@ -135,15 +161,22 @@ def run_backtest(
                 p = float(px[t]) if t in px.index else np.nan
                 if np.isnan(p):
                     raise ValueError(f"{d.date()} {t} 가격이 없다")
-                cur_val = shares.get(t, 0.0) * p * rate
+                cur_val = shares.get(t, 0.0) * p * R(t)
                 diff = target_val.get(t, 0.0) - cur_val
                 if diff < -1e-9 and shares.get(t, 0.0) > 0:
-                    qty = min(shares[t], -diff / (p * rate))
+                    qty = min(shares[t], -diff / (p * R(t)))
                     usd = qty * p * (1 - trade_cost)
-                    usd_sold += usd
-                    net = usd * rate
+                    if t not in krw:
+                        usd_sold += usd
+                    net = usd * R(t)
                     avg = basis[t] / shares[t]
-                    realized_year += net - avg * qty
+                    g = net - avg * qty
+                    if imm or (account == "foreign" and t in krw):  # 팔 때마다 15.4%(손실 상계 없음)
+                        tx = max(0.0, g) * costs.domestic_tax
+                        net -= tx
+                        taxes[d.year] = taxes.get(d.year, 0.0) + tx
+                    elif account == "foreign":
+                        realized_year += g
                     basis[t] -= avg * qty
                     shares[t] -= qty
                     cash += net
@@ -154,19 +187,21 @@ def run_backtest(
             buys = {}
             for t, tv in target_val.items():
                 p = float(px[t])
-                cur_val = shares.get(t, 0.0) * p * rate
+                cur_val = shares.get(t, 0.0) * p * R(t)
                 if tv - cur_val > 1e-9:
                     buys[t] = tv - cur_val
             # 환전은 순액만: 판 달러로 먼저 사고 모자란 만큼만 원화→달러(반대면 남은 달러만 원화로)
             gross_buy = sum(v * (1 + trade_cost) for v in buys.values())
-            fx_need = max(0.0, gross_buy - usd_sold * rate) * costs.fx_spread + max(0.0, usd_sold * rate - gross_buy) * costs.fx_spread
+            gross_usd = sum(v * (1 + trade_cost) for t, v in buys.items() if t not in krw)
+            fx_need = abs(gross_usd - usd_sold * rate) * costs.fx_spread
             need = gross_buy + fx_need
             scale = min(1.0, cash / need) if need > 0 else 0.0
             for t, v in buys.items():
                 p = float(px[t])
                 spend = v * scale * (1 + trade_cost)
-                qty = v * scale / (p * rate)
-                usd_bought += qty * p
+                qty = v * scale / (p * R(t))
+                if t not in krw:
+                    usd_bought += qty * p
                 shares[t] = shares.get(t, 0.0) + qty
                 basis[t] = basis.get(t, 0.0) + spend
                 cash -= spend
@@ -176,18 +211,18 @@ def run_backtest(
 
         # 연말 세금(현금이 모자라면 보유분을 비례로 팔아 낸다)
         last_of_year = i == len(idx) - 1 or idx[i + 1].year != d.year
-        if last_of_year and i < len(idx) - 1:
+        if last_of_year and i < len(idx) - 1 and account == "foreign":
             tax = max(0.0, realized_year - costs.tax_deduction_krw) * costs.tax_rate
             if tax > 0:
                 cash -= tax
                 taxes[d.year] = taxes.get(d.year, 0.0) + tax
             realized_year = 0.0
             if cash < 0 and shares:
-                hold = sum(q * float(px[t]) * rate for t, q in shares.items())
+                hold = sum(q * float(px[t]) * R(t) for t, q in shares.items())
                 frac = min(1.0, -cash / (hold * (1 - trade_cost) * (1 - costs.fx_spread)))
                 for t in list(shares):
                     qty = shares[t] * frac
-                    net = qty * float(px[t]) * rate * (1 - trade_cost) * (1 - costs.fx_spread)
+                    net = qty * float(px[t]) * R(t) * (1 - trade_cost) * (1.0 if t in krw else 1 - costs.fx_spread)
                     avg = basis[t] / shares[t]
                     realized_year += net - avg * qty  # 다음 해 실현분으로
                     basis[t] -= avg * qty
@@ -195,15 +230,15 @@ def run_backtest(
                     cash += net
                     trades.append({"date": d, "ticker": t, "side": "sell", "qty": qty, "krw": net, "why": "세금"})
 
-        value = cash + sum(q * float(px[t]) * rate for t, q in shares.items())
+        value = cash + sum(q * float(px[t]) * R(t) for t, q in shares.items())
         nav.append(value)
-        liq.append(_liquidation_value(cash, shares, basis, realized_year, px, rate, costs))
-        wrows.append({t: q * float(px[t]) * rate / value for t, q in shares.items()} if value > 0 else {})
+        liq.append(_liquidation_value(cash, shares, basis, realized_year, px, rate, costs, krw, account, capital_krw))
+        wrows.append({t: q * float(px[t]) * R(t) / value for t, q in shares.items()} if value > 0 else {})
 
         if i < len(idx) - 1 and (first_signal or d in rebal):
             history = prices.loc[:d]
             if wants_state:  # 계좌 상태(그날 종가 기준, 과거만)를 넘긴다 — 절세 매도용
-                pos = {t: {"value": q * float(px[t]) * rate, "basis": basis[t]} for t, q in shares.items()}
+                pos = {t: {"value": q * float(px[t]) * R(t), "basis": basis[t]} for t, q in shares.items()}
                 state = {"value": value, "cash": cash, "positions": pos, "realized": realized_year, "year": d.year}
                 raw = strategy.weights(d, history, state)
             else:
@@ -217,17 +252,9 @@ def run_backtest(
             pending = w
             first_signal = False
 
-    # 마지막 날 전부 판다고 가정한 세후 금액(올해 실현분 + 미실현분)
+    # 마지막 날 전부 판다고 가정한 세후 금액(계좌 모형별)
     d = idx[-1]
-    px = prices.loc[d]
-    rate = float(fx.loc[d])
-    liq_gain = realized_year
-    liq_cash = cash
-    for t, q in shares.items():
-        net = q * float(px[t]) * rate * (1 - trade_cost) * (1 - costs.fx_spread)
-        liq_gain += net - basis[t]
-        liq_cash += net
-    liq_tax = max(0.0, liq_gain - costs.tax_deduction_krw) * costs.tax_rate
+    after = _liquidation_value(cash, shares, basis, realized_year, prices.loc[d], float(fx.loc[d]), costs, krw, account, capital_krw)
     wdf = pd.DataFrame(wrows, index=idx).fillna(0.0)
-    return BacktestResult(pd.Series(nav, index=idx, name=strategy.name), trades, taxes, liq_cash - liq_tax, wdf, div_tax_total,
+    return BacktestResult(pd.Series(nav, index=idx, name=strategy.name), trades, taxes, after, wdf, div_tax_total,
                           pd.Series(liq, index=idx, name=strategy.name))
