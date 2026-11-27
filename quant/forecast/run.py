@@ -109,7 +109,7 @@ def run_batch(prices: pd.DataFrame, fx: pd.Series, exps: list[Exp], benches: lis
     srs = [r["cond"][cond_key(conditions[0])]["excess_sharpe_daily"] for r in trials]
     srs = [s for s in srs if s == s]
     var = float(np.var(srs, ddof=1)) if len(srs) >= 2 else None
-    n = n_trials if n_trials is not None else PREV_TRIALS + len(ROUND2) + (0 if period == "dev" else len(trials))
+    n = n_trials if n_trials is not None else 37 + len(ROUND2) + (0 if period == "dev" else len(trials))  # 2차 계획 #59 값
     for r in trials:
         r["cond"][cond_key(conditions[0])]["dsr_excess"] = deflated_sharpe_excess(r["_nav"], r["_bench"], n, var)
         r["cond"][cond_key(conditions[0])]["n_trials"] = n
@@ -200,7 +200,7 @@ def table(res: dict, period: str, elig: dict | None) -> str:
     p = lambda v, d=1: "—" if v is None or v != v else f"{v * 100:+.{d}f}%"  # noqa: E731
     x = lambda v, d=2: "—" if v is None or v != v else f"{v:.{d}f}"  # noqa: E731
     base, keys = cond_key(BASE), [cond_key(c) for c in CONDITIONS]
-    out = [f"### 실험실 2차 · Fable 설계 #{PLAN_ISSUE} · {period} · 기준 조건 1억·비용 1배", "",
+    out = [f"### 실험실 2차 · Fable 설계 #59 · {period} · 기준 조건 1억·비용 1배", "",
            "| 실험 | 묶음 | 청산 세후 | S&P | 최악 손실 | S&P | 오른/내린 달 | 매매 | 평균 주식 | 예측력 | S&P 대비 DSR | 점수(1억·1배 / 1천만·1배 / 1억·2배 / 1천만·2배) | 자격 |",
            "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     rows = sorted(res["rows"], key=lambda r: (r["benchmark"], -(r.get("cond", {}).get(base, {}).get("score", -9))))
@@ -260,12 +260,74 @@ def _round1(a, conn, prices, fx, mf, sha):
     return 0
 
 
+def _round3(a, conn, prices, fx, mf, sha, out: Path) -> int:
+    """3차(계획 #66): 청산 기준 평가액으로 모든 지표, 베타 보정 알파, 계획 규칙대로 자격·통과."""
+    from .experiments import BENCHMARKS3, ROUND3
+    from .round3 import BASE, ck, eligibility3, pass_table3, run_batch3, table3
+    div = load_div_yield(conn)
+    reg = DbRegistry(conn)
+    pick = {s.strip() for s in a.ids.split(",") if s.strip()}
+    exps = [e for e in ROUND3 if not pick or e.id in pick]
+    db_trials = reg.distinct_trials()
+    if a.period == "dev":
+        n = max(PREV_TRIALS + len(ROUND3), db_trials)
+    else:
+        n = 5 + len(exps)  # 검증에 올라간 전략 수: 1차 5 + 이번에 올린 수(계획 #66 통과 기준 7)
+    # 실업률 첫 발표값 점검: 2003~2022에 발표가 기준월보다 60일 넘게 늦게 기록된 값이 있으면 멈춘다(계획 #66)
+    um = load_macro(conn, ["UNRATE"]).get("UNRATE")
+    if um is not None and not um.empty:
+        late = um[(pd.to_datetime(um["ref_date"]) >= "2003-01-01") & (pd.to_datetime(um["ref_date"]) <= "2022-12-31")
+                  & ((pd.to_datetime(um["release_date"]) - pd.to_datetime(um["ref_date"])).dt.days > 60)]
+        if len(late):
+            print(f"멈춤: 실업률 발표일이 60일 넘게 늦은 값 {len(late)}개(예: {late.iloc[0]['ref_date']}) — 계획 #66 규칙")
+            return 1
+    else:
+        print("멈춤: 실업률(UNRATE) 기록이 없다")
+        return 1
+    first = {t: (str(prices[t].first_valid_index().date()) if t in prices and prices[t].first_valid_index() is not None else None)
+             for t in ["SPY", "IVV", "SHY", "TLT", "GLD"]}
+    if a.period == "dev" and (first["SPY"] is None or first["SHY"] is None or first["SPY"] > "2003-01-01" or first["SHY"] > "2003-01-01"):
+        print(f"멈춤: SPY·SHY 시세가 2003-01-01 이전부터 없다 {first}")
+        return 1
+    res = run_batch3(prices, fx, exps, BENCHMARKS3, mf, period=a.period, div_yield=div, n_trials=n,
+                     log=lambda s: print(s, flush=True))
+    elig = eligibility3(res["rows"]) if a.period == "dev" else None
+    passes, combined = None, {}
+    if a.period == "valid":
+        both = run_batch3(prices, fx, exps, [], mf, period="valid", div_yield=div, conditions=[BASE], n_trials=n,
+                          start="2004-01-01", end="2022-12-31", log=lambda s: print("[2004~2022] " + s, flush=True))
+        combined = {r["id"]: r["cond"][ck(BASE)]["alpha_t"] for r in both["rows"] if "error" not in r}
+        passes = pass_table3(res["rows"], combined)
+    data_date = str(prices.index[-1].date())
+    for r in res["rows"]:
+        if r["benchmark"] or "error" in r:
+            continue
+        m = {k: v for k, v in r["cond"][ck(BASE)].items() if k not in ("year_end", "bench_year_end", "valid_drawdowns")}
+        m["conditions"] = {k: {kk: v.get(kk) for kk in ("liq_cagr", "mdd", "alpha", "score", "trades")} for k, v in r["cond"].items()}
+        reg.add(Experiment(r["id"], r["hypothesis"], {"group": r["group"], "rebalance": r["rebalance"], "plan": PLAN_ISSUE},
+                           a.period, data_date, sha, _clean(m), False))
+    conn.commit()
+    for k, df in res.pop("daily").items():
+        df.to_csv(out / f"daily-{a.period}-{k}.csv", index_label="date")
+    meta = {"plan_issue": PLAN_ISSUE, "round": 3, "code_version": sha, "data_date": data_date, "period": a.period,
+            "split": [str(x.date()) if x is not None else None for x in DEFAULT_SPLITS.period(a.period)],
+            "n_trials": n, "db_distinct_trials": db_trials, "price_first_dates": first,
+            "unrate_first": str(mf["unrate_latest"].first_valid_index()) if "unrate_latest" in mf else None,
+            "dividend_days": int(div.notna().sum().sum()) if not div.empty else 0, "combined_alpha_t": combined}
+    md = table3(res, a.period, PLAN_ISSUE, elig, passes)
+    (out / f"forecast-{a.period}.md").write_text(md)
+    (out / f"forecast-{a.period}.json").write_text(json.dumps({"meta": meta, **res, "eligibility": elig, "passes": passes},
+                                                              ensure_ascii=False, default=str, indent=1))
+    print(md)
+    return 0 if any("error" not in r for r in res["rows"]) else 1
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--period", choices=["dev", "valid"], default="dev")
     ap.add_argument("--ids", default="", help="쉼표로 고르기(빈칸=2차 11개 전부, 기준선은 늘 같이)")
     ap.add_argument("--out", default="lab-out")
-    ap.add_argument("--round", type=int, choices=[1, 2], default=2)
+    ap.add_argument("--round", type=int, choices=[1, 2, 3], default=3)
     a = ap.parse_args()
     url = os.environ.get("DATABASE_URL")
     if not url:
@@ -281,6 +343,8 @@ def main() -> int:
         mf = macro_panel(load_macro(conn, MACRO_SERIES), prices.index)
         if a.round == 1:
             return _round1(a, conn, prices, fx, mf, sha)
+        if a.round == 3:
+            return _round3(a, conn, prices, fx, mf, sha, out)
         div = load_div_yield(conn)
         pick = {s.strip() for s in a.ids.split(",") if s.strip()}
         exps = [e for e in ROUND2 if not pick or e.id in pick]
@@ -294,12 +358,12 @@ def main() -> int:
                 continue
             m = dict(r["cond"][cond_key(BASE)], **{f"ic_{k}": v for k, v in (r.get("ic") or {}).items()})
             m["conditions"] = {k: {kk: v.get(kk) for kk in ("liq_cagr", "mdd", "score", "trades")} for k, v in r["cond"].items()}
-            reg.add(Experiment(r["id"], r["hypothesis"], {"group": r["group"], "rebalance": r["rebalance"], "plan": PLAN_ISSUE},
+            reg.add(Experiment(r["id"], r["hypothesis"], {"group": r["group"], "rebalance": r["rebalance"], "plan": 59},
                                a.period, data_date, sha, _clean(m), False))
         conn.commit()
     for k, df in res.pop("daily").items():
         df.to_csv(out / f"daily-{a.period}-{k}.csv", index_label="date")
-    meta = {"plan_issue": PLAN_ISSUE, "code_version": sha, "data_date": data_date, "period": a.period,
+    meta = {"plan_issue": 59, "code_version": sha, "data_date": data_date, "period": a.period,
             "conditions": [cond_key(c) for c in CONDITIONS], "base": cond_key(BASE),
             "feature_first_dates": first_dates(mf, CLEAN_MARKET),
             "price_first_dates": {t: (str(prices[t].first_valid_index().date()) if t in prices else None)

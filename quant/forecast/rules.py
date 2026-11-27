@@ -188,3 +188,210 @@ class FixedMix:
             return dict(self.mix)
         ok = [t for t in SECTORS if t in history and history[t].notna().sum() >= 252 and pd.notna(history[t].iloc[-1])]
         return {t: 1 / len(ok) for t in ok} if ok else None
+
+
+# ── 3차(Fable 설계 #66): 일부만 줄이기·실업률 추세·변동성 바닥·고정 비중 띠·절세 매도 ──
+
+class TrendPartial:
+    """D01~D03: 200일선 상태가 '피함'이면 SPY avoid_equity·SHY 나머지, '보유'면 SPY 100%. 상태가 바뀔 때만 매매."""
+
+    def __init__(self, name: str, avoid_equity: float = 0.7, band: float = 0.02):
+        self.name, self.ae, self.state, self.last = name, avoid_equity, TrendState(band=band), None
+        self.avoid_count = 0
+
+    def target(self, history) -> bool:
+        return self.state.update(history["SPY"])
+
+    def weights(self, as_of, history):
+        avoid = self.target(history)
+        if self.last is not None and avoid == self.last:
+            return None
+        if avoid:
+            self.avoid_count += 1
+        self.last = avoid
+        return alloc(self.ae, False) if avoid else {"SPY": 1.0}
+
+
+class GrowthTrend:
+    """G01·G02: 'SPY < 200일 평균 그리고 최신 실업률 > 직전 12개 평균'일 때만 피함(SPY avoid_equity). 월말 1회, 바뀔 때만."""
+
+    def __init__(self, name: str, unrate: pd.DataFrame, avoid_equity: float = 0.0):
+        """unrate: 날짜 × (latest, prev_mean) — features.unrate_signal 결과(macro_panel의 unrate_latest·unrate_prev12)."""
+        self.name, self.u, self.ae, self.last = name, unrate, avoid_equity, None
+        self.avoid_count = 0
+
+    def target(self, history) -> bool:
+        as_of = history.index[-1]
+        s = history["SPY"].dropna()
+        if len(s) < 200 or as_of not in self.u.index:
+            return False
+        lat, prev = self.u.at[as_of, "latest"], self.u.at[as_of, "prev_mean"]
+        if pd.isna(lat) or pd.isna(prev):
+            return False
+        return bool(s.iloc[-1] < s.iloc[-200:].mean() and lat > prev)
+
+    def weights(self, as_of, history):
+        avoid = self.target(history)
+        if self.last is not None and avoid == self.last:
+            return None
+        if avoid:
+            self.avoid_count += 1
+        self.last = avoid
+        return alloc(self.ae, False) if avoid else {"SPY": 1.0}
+
+
+class VolFloor(VolTarget):
+    """V01: 노출 = 목표 ÷ 변동성을 [floor, 1]로 자름. 직전 노출과 band 이상 다를 때만."""
+
+    def __init__(self, name: str, target: float = 0.15, floor: float = 0.6, band: float = 0.15, window: int = 21):
+        super().__init__(name, target=target, cap=1.0, window=window, band=band)
+        self.floor = floor
+
+    def weights(self, as_of, history):
+        vol = realized_vol(history["SPY"], self.window)
+        if vol is None or vol <= 0:
+            return None
+        e = float(np.clip(self.target / vol, self.floor, 1.0))
+        self.exposures.append((as_of, e))
+        if self.last is not None and abs(e - self.last) < self.band:
+            return None
+        self.last = e
+        return alloc(e, False)
+
+
+class BandedMix:
+    """M01: 목표 비중(시세 없는 자산 몫은 SHY). 11월 마지막 거래일(월말 호출)에만 보고, 한 자산이라도 5%p 넘게 벗어나면 다시 맞춤."""
+    wants_state = True
+
+    def __init__(self, name: str, mix: dict[str, float], band: float = 0.05, month: int = 11):
+        self.name, self.mix, self.band, self.month, self.started = name, mix, band, month, False
+
+    def _target(self, history) -> dict[str, float]:
+        w = {t: v for t, v in self.mix.items() if _has_today(history, t)}
+        miss = 1 - sum(w.values())
+        if miss > 1e-9:
+            w["SHY"] = w.get("SHY", 0.0) + miss
+        return w
+
+    def weights(self, as_of, history, state):
+        tgt = self._target(history)
+        if not self.started:
+            self.started = True
+            return tgt
+        if as_of.month != self.month or state["value"] <= 0:
+            return None
+        cur = {t: p["value"] / state["value"] for t, p in state["positions"].items()}
+        if max(abs(cur.get(t, 0.0) - tgt.get(t, 0.0)) for t in set(cur) | set(tgt)) <= self.band:
+            return None
+        return tgt
+
+
+def _gain_ratio(p: dict) -> float:
+    return p["value"] / p["basis"] - 1 if p.get("basis", 0) > 0 else 0.0
+
+
+def harvest_move(vals: dict[str, float], ratio: dict[str, float], realized: float, *, deduction: float = 2_500_000.0,
+                 use: float = 0.9, min_ratio: float = 0.02, min_krw: float = 100_000.0, pair=("SPY", "IVV")) -> tuple[str, str, float] | None:
+    """절세 매도 한 번: 공제의 use배까지 남은 이익을 실현하도록, 이익 비율이 큰 쪽(pair 안)을 팔아 다른 쪽을 산다.
+    반환 (파는 종목, 사는 종목, 원화 금액) 또는 None. 이익 X원을 실현하려면 평가액 X × (1+g)/g 를 판다."""
+    room = (deduction - realized) * use
+    if room <= 0:
+        return None
+    held = [t for t in pair if vals.get(t, 0) > 0]
+    if not held:
+        return None
+    a = max(held, key=lambda t: ratio.get(t, 0.0))
+    g = ratio.get(a, 0.0)
+    if g < min_ratio:
+        return None
+    amt = min(vals[a], room * (1 + g) / g)
+    if amt < min_krw:
+        return None
+    b = pair[1] if a == pair[0] else pair[0]
+    return a, b, float(amt)
+
+
+def _is_last_check_of(as_of: pd.Timestamp, month: int, step_days: int) -> bool:
+    """그 달의 마지막 확인일인가: 다음 확인일(step_days 뒤 영업일)이 다음 달이면 그렇다(달력만 씀, 시세 안 봄)."""
+    nxt = as_of + (pd.offsets.BDay(1) if step_days <= 1 else pd.Timedelta(days=step_days))
+    return as_of.month == month and nxt.month != month
+
+
+class TaxHarvest:
+    """H01: S&P(SPY·IVV)를 그냥 들되, 11월 마지막 거래일에 공제 한도 90%까지 이익을 실현(SPY↔IVV 갈아타기).
+    그 밖에는 그대로 둠. IVV 시세가 없으면 안 함. 계좌 상태는 그날 종가 기준(과거만)."""
+    wants_state = True
+
+    def __init__(self, name: str, month: int = 11, deduction: float = 2_500_000.0):
+        self.name, self.month, self.deduction, self.started = name, month, deduction, False
+        self.harvests: list[tuple[pd.Timestamp, str, float]] = []
+
+    def weights(self, as_of, history, state):
+        if not self.started:
+            self.started = True
+            return {"SPY": 1.0}
+        if as_of.month != self.month or not _has_today(history, "IVV") or state["value"] <= 0:
+            return None
+        pos = state["positions"]
+        vals = {t: p["value"] for t, p in pos.items()}
+        mv = harvest_move(vals, {t: _gain_ratio(p) for t, p in pos.items()}, state["realized"], deduction=self.deduction)
+        if mv is None:
+            return None
+        a, b, amt = mv
+        vals[a] -= amt
+        vals[b] = vals.get(b, 0.0) + amt
+        self.harvests.append((as_of, a, amt))
+        return {t: v / state["value"] for t, v in vals.items() if v > 1e-6}
+
+
+class HarvestOverlay:
+    """C01·C02: 바탕 규칙(D01·G02)의 주식 비중 + 11월 마지막 확인일 절세 매도.
+    주식 몫은 SPY+IVV 합. 줄일 때는 이익 비율이 낮은 쪽부터 팔고, 늘릴 때는 보유액이 작은 쪽을 산다. '피함'에서도 절세 매도는 한다."""
+    wants_state = True
+
+    def __init__(self, name: str, base, step_days: int, month: int = 11, deduction: float = 2_500_000.0):
+        self.name, self.base, self.step, self.month, self.deduction = name, base, step_days, month, deduction
+        self.equity: float | None = None
+        self.harvests: list[tuple[pd.Timestamp, str, float]] = []
+
+    def weights(self, as_of, history, state):
+        b = self.base.weights(as_of, history)
+        V = state["value"]
+        pos = state["positions"]
+        if self.equity is None:  # 첫 신호: 바탕 규칙 그대로(주식은 SPY)
+            self.equity = (b or {"SPY": 1.0}).get("SPY", 0.0)
+            return b or {"SPY": 1.0}
+        vals = {t: p["value"] for t, p in pos.items()}
+        ratio = {t: _gain_ratio(p) for t, p in pos.items()}
+        changed, realized = False, state["realized"]
+        if b is not None:
+            e = b.get("SPY", 0.0)
+            self.equity, changed = e, True
+            eq_now = vals.get("SPY", 0.0) + vals.get("IVV", 0.0)
+            diff = e * V - eq_now
+            if diff < 0:  # 줄이기: 이익 비율 낮은 쪽부터
+                left = -diff
+                for t in sorted([t for t in ("SPY", "IVV") if vals.get(t, 0) > 0], key=lambda t: ratio.get(t, 0.0)):
+                    cut = min(vals[t], left)
+                    g = ratio.get(t, 0.0)
+                    realized += cut * g / (1 + g) if g > -1 else 0.0
+                    vals[t] -= cut
+                    left -= cut
+            elif diff > 0:  # 늘리기: 보유액이 작은 쪽(IVV 시세 없으면 SPY)
+                cands = ["SPY", "IVV"] if _has_today(history, "IVV") else ["SPY"]
+                t = min(cands, key=lambda x: vals.get(x, 0.0))
+                vals[t] = vals.get(t, 0.0) + diff
+            vals["SHY"] = (1 - e) * V
+        if _is_last_check_of(as_of, self.month, self.step) and _has_today(history, "IVV") and V > 0:
+            mv = harvest_move(vals, ratio, realized, deduction=self.deduction)
+            if mv is not None:
+                a, bb, amt = mv
+                vals[a] -= amt
+                vals[bb] = vals.get(bb, 0.0) + amt
+                self.harvests.append((as_of, a, amt))
+                changed = True
+        if not changed:
+            return None
+        tot = sum(v for v in vals.values() if v > 0)
+        scale = min(1.0, V / tot) if tot > 0 else 1.0
+        return {t: v * scale / V for t, v in vals.items() if v > 1e-6}

@@ -41,6 +41,18 @@ class BacktestResult:
     after_tax_if_liquidated: float = float("nan")
     weights: pd.DataFrame | None = None  # 날짜별 종가 기준 보유 비중(현금 제외)
     dividend_taxes: float = 0.0
+    liq_nav: pd.Series | None = None     # 날짜별 '그날 다 팔고 세금까지 내면 남는 돈'(3차, 계획 #66)
+
+
+def _liquidation_value(cash: float, shares: dict, basis: dict, realized_year: float, px, rate: float, costs: "Costs") -> float:
+    """그날 종가에 전부 팔고(매도 비용·환전) 올해 실현이익 + 미실현이익에 양도세까지 낸 뒤 남는 원화."""
+    trade_cost = costs.fee + costs.slippage
+    gain, out = realized_year, cash
+    for t, q in shares.items():
+        net = q * float(px[t]) * rate * (1 - trade_cost) * (1 - costs.fx_spread)
+        gain += net - basis[t]
+        out += net
+    return out - max(0.0, gain - costs.tax_deduction_krw) * costs.tax_rate
 
 
 def _check_inputs(prices: pd.DataFrame, fx: pd.Series) -> pd.Series:
@@ -100,6 +112,8 @@ def run_backtest(
     trade_cost = costs.fee + costs.slippage
     div_tax_total = 0.0
     wrows = []
+    liq: list[float] = []
+    wants_state = bool(getattr(strategy, "wants_state", False))
     for i, d in enumerate(idx):
         px = prices.loc[d]
         rate = float(fx.loc[d])
@@ -183,11 +197,17 @@ def run_backtest(
 
         value = cash + sum(q * float(px[t]) * rate for t, q in shares.items())
         nav.append(value)
+        liq.append(_liquidation_value(cash, shares, basis, realized_year, px, rate, costs))
         wrows.append({t: q * float(px[t]) * rate / value for t, q in shares.items()} if value > 0 else {})
 
         if i < len(idx) - 1 and (first_signal or d in rebal):
             history = prices.loc[:d]
-            raw = strategy.weights(d, history)
+            if wants_state:  # 계좌 상태(그날 종가 기준, 과거만)를 넘긴다 — 절세 매도용
+                pos = {t: {"value": q * float(px[t]) * rate, "basis": basis[t]} for t, q in shares.items()}
+                state = {"value": value, "cash": cash, "positions": pos, "realized": realized_year, "year": d.year}
+                raw = strategy.weights(d, history, state)
+            else:
+                raw = strategy.weights(d, history)
             if raw is None and not first_signal:  # 그대로 둠(띠 안·변화 없음)
                 continue
             w = {t: float(v) for t, v in dict(raw or {}).items() if v and float(v) > 0}
@@ -209,4 +229,5 @@ def run_backtest(
         liq_cash += net
     liq_tax = max(0.0, liq_gain - costs.tax_deduction_krw) * costs.tax_rate
     wdf = pd.DataFrame(wrows, index=idx).fillna(0.0)
-    return BacktestResult(pd.Series(nav, index=idx, name=strategy.name), trades, taxes, liq_cash - liq_tax, wdf, div_tax_total)
+    return BacktestResult(pd.Series(nav, index=idx, name=strategy.name), trades, taxes, liq_cash - liq_tax, wdf, div_tax_total,
+                          pd.Series(liq, index=idx, name=strategy.name))

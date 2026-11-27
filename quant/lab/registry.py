@@ -39,6 +39,10 @@ class Registry:
         """모든 전략을 합친 시도 수(최종 평가 제외). 우연 보정(DSR)의 n으로 쓴다."""
         return sum(1 for e in self.all() if not e.get("final"))
 
+    def distinct_trials(self) -> int:
+        """서로 다른 전략 id 수(최종 평가 제외) — 3차부터 우연 보정 시도 수(계획 #66)."""
+        return len({e["strategy"] for e in self.all() if not e.get("final")})
+
     def trial_sharpes(self) -> list[float]:
         out = []
         for e in self.all():
