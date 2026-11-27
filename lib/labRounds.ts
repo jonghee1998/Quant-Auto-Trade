@@ -12,10 +12,30 @@ const D1 = (ret: number, mdd: number) => r(ret, 12.6, mdd, -19); // 1차 개발:
 const V1 = (ret: number, mdd: number) => r(ret, 12.8, mdd, -30); // 1차 검증: S&P +12.8%, 최악 −30%
 const D4 = (ret: number, mdd: number) => r(ret, 6.18, mdd, -26); // 4차 개발 2004~17(해외 직접 S&P 기준)
 const F4 = (ret: number, mdd: number) => r(ret, 4.40, mdd, -44); // 4차 환헤지 묶음 개발 1999~2017
+const P5 = (ret: number, mdd: number) => r(ret, 8.83, mdd, -28); // 5차 개발 2004~17, 매달 150만 적립(세후 내부수익률), S&P 같은 일정
+const L5 = (ret: number, mdd: number) => r(ret, 6.47, mdd, -28); // 5차 개발, 1억 한 번
+const M5 = (ret: number, mdd: number) => r(ret, 8.86, mdd, -28); // 5차 개발, 매달 50만
 const D3 = (ret: number, mdd: number) => r(ret, 6.18, mdd, -26); // 3차 개발 2004~17: S&P 청산 기준 +6.18%, 최악 −26%(원화)
 const V3 = (ret: number, mdd: number) => r(ret, 10.19, mdd, -25); // 3차 검증 2018~22: S&P +10.19%, 최악 −25%
 
 export const ROUNDS: Round[] = [
+  {
+    round: 5, title: '적립식·ISA·연금(세금 구조)', planIssue: 79, judgeIssue: 82,
+    conclusion: '후보 없음. 세금 구조로 남는 건 연 0.1~0.2%p. 가장 큰 확실한 이득은 매매가 아니라 연금 세액공제(사람의 가계 결정).',
+    basis: '개발 2004~17 · 세후 내부수익률(다 팔고 세금 낸 뒤) · 5차 엔진(배당 원가 반영)',
+    exps: [
+      { id: 'R5_P1', name: '연금저축 + 환급금 재투자', approach: '매달 50만 원을 연금저축(국내 S&P)에, 세액공제 환급금(13.2%)은 다음 해 3월 해외 S&P로', v: '보류', dev: M5(9.39, -27), note: '중도 해지해도 +0.53%p, 연금 수령이면 +1.9%p. 55세까지 묶임 — 사람이 정할 일' },
+      { id: 'R5_A4', name: 'ISA 5년 + 해외 직접', approach: 'ISA(연 2천만·총 1억)에 먼저, 넘친 돈은 해외 S&P. 5년마다 정산·재가입', v: '보류', dev: P5(8.94, -29), note: '+0.11%p(150만 적립). 1억 한 번은 +0.04%p로 문턱 미달' },
+      { id: 'R5_H1', name: '절세 매도(적립식)', approach: '매달 S&P를 사고 11월 말에 SPY↔IVV로 공제 90%만큼 이익 실현', v: '보류', dev: P5(8.91, -28), note: 'IVV 대비 +0.04~0.50%p, 14년에 150~190만 원. 월 50만에서 문턱 미달 — 기능' },
+      { id: 'R5_A2', name: 'ISA 3년 + 절세 매도', approach: 'A1 + 바깥 계좌 11월 말 절세 매도', v: '탈락', dev: P5(8.90, -29), note: '같은 공제를 나눠 써서 A1보다 나은 곳이 없음' },
+      { id: 'R5_A1', name: 'ISA 3년 + 해외 직접', approach: 'ISA에 먼저, 넘친 돈 해외 S&P, 3년마다 정산·재가입, 1월에 바깥→ISA 이전', v: '탈락', dev: P5(8.89, -29), note: '+0.19 / +0.06 / +0.00%p — 절세 매도만 한 것보다 못함' },
+      { id: 'R5_I1', name: 'ISA에 1억 한 번(가정)', approach: '한도 없이 1억을 ISA 국내 S&P에(배당세 15% 반영)', v: '탈락', dev: L5(6.76, -28), note: '+0.29%p지만 연 한도 때문에 불가능한 가정' },
+      { id: 'R5_I2', name: 'ISA 90:10(가정)', approach: '한도 없는 ISA에 국내 S&P 90·미국 단기채 10', v: '탈락', dev: L5(6.55, -22), note: '+0.07%p. 4차 "자격"은 옛 엔진 버그 덕' },
+      { id: 'R5_A3', name: '계좌마다 90:10', approach: 'A1 구조에서 ISA·바깥 모두 S&P 90·단기채 10', v: '탈락', dev: P5(8.25, -22), note: '덜 빠짐은 그냥 90:10과 같음, 수익 −0.6%p' },
+      { id: 'R5_A5', name: '계좌마다 90:10 + 절세 매도', approach: 'A3 + 바깥 절세 매도', v: '탈락', dev: P5(8.23, -22), note: 'A3와 같음' },
+      { id: 'R5_I3', name: 'ISA 80:20(가정)', approach: '한도 없는 ISA에 국내 S&P 80·미국 단기채 20', v: '탈락', dev: L5(5.88, -18), note: '−0.59%p' },
+    ],
+  },
   {
     round: 4, title: '세금·계좌 구조·환헤지', planIssue: 73, judgeIssue: 77,
     conclusion: '후보 없음. 맞혀서 버는 전략은 없었다. 남은 건 절세 매도(기능)와 절세계좌(계좌 선택) — 측정을 고친 뒤 다시 본다.',
