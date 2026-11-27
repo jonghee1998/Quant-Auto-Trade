@@ -15,10 +15,25 @@ const F4 = (ret: number, mdd: number) => r(ret, 4.40, mdd, -44); // 4차 환헤�
 const P5 = (ret: number, mdd: number) => r(ret, 8.83, mdd, -28); // 5차 개발 2004~17, 매달 150만 적립(세후 내부수익률), S&P 같은 일정
 const L5 = (ret: number, mdd: number) => r(ret, 6.47, mdd, -28); // 5차 개발, 1억 한 번
 const M5 = (ret: number, mdd: number) => r(ret, 8.86, mdd, -28); // 5차 개발, 매달 50만
+const P6 = (ret: number, mdd: number) => r(ret, 8.96, mdd, -28); // 6차 개발, 매달 150만, 10년 나눠 파는 결말
+const M6 = (ret: number, mdd: number) => r(ret, 9.29, mdd, -27); // 6차 개발, 매달 50만(연금 구조 기준선 BP1 대비가 아니라 S&P 대비)
 const D3 = (ret: number, mdd: number) => r(ret, 6.18, mdd, -26); // 3차 개발 2004~17: S&P 청산 기준 +6.18%, 최악 −26%(원화)
 const V3 = (ret: number, mdd: number) => r(ret, 10.19, mdd, -25); // 3차 검증 2018~22: S&P +10.19%, 최악 −25%
 
 export const ROUNDS: Round[] = [
+  {
+    round: 6, title: '나눠 파는 결말·계좌 순서·계좌 안 줄이기', planIssue: 85, judgeIssue: 89,
+    conclusion: '후보 없음. 절세 매도는 검증에서 탈락(쌓인 이익이 작으면 수수료만 나감). 200일선·실업률 규칙은 1980~2022 긴 과거 관문에서 탈락해 완전히 닫음.',
+    basis: '개발 2004~17 · 10년 나눠 파는 결말 기준 세후 내부수익률 · 세법 확인 필요',
+    exps: [
+      { id: 'R6_G2', name: '연금 안에서만 200일선+실업률', approach: '연금 계좌 안만 신호 때 국내 S&P 100 ↔ 50:50(갈아타도 세금 없음)', v: '탈락', dev: M6(10.67, -18), note: '개발 +1.4%p였지만 긴 과거 하락 10번 중 4번만 덜 빠져 관문 탈락' },
+      { id: 'R6_G1', name: 'ISA 안에서만 200일선+실업률', approach: 'ISA 계좌 안만 신호 때 국내 S&P 100 ↔ 50:50', v: '탈락', dev: P6(10.30, -24), note: '같은 관문 탈락 — G 묶음 완전히 닫음' },
+      { id: 'R6_W2', name: '연금 → 해외 직접', approach: '그해 연금 600만까지, 나머지 해외 S&P + 절세 매도', v: '탈락', dev: P6(9.15, -28), note: '+0.19%p, 기준 +0.3%p 미달' },
+      { id: 'R6_W1', name: '연금 → ISA → 해외 직접', approach: '연금 600만 → ISA(5년) → 해외 S&P + 절세 매도', v: '탈락', dev: P6(9.09, -28), note: '+0.14%p, 기준 +0.5%p 미달. 순서 효과도 확인 안 됨' },
+      { id: 'R6_H1', name: '절세 매도(10년 나눠 파는 결말)', approach: '11월 말 신호일에 수량을 정해 다음 날 SPY↔IVV(환전 없이)', v: '탈락', dev: P6(9.05, -28), note: '개발 +182만 원으로 검증에 갔지만 5년 검증에선 −13만 원 — 이익이 작으면 필요 없음' },
+      { id: 'R6_W3', name: 'ISA → 해외 직접', approach: 'ISA(5년) → 해외 S&P + 절세 매도', v: '탈락', dev: P6(9.01, -29), note: '+0.06%p' },
+    ],
+  },
   {
     round: 5, title: '적립식·ISA·연금(세금 구조)', planIssue: 79, judgeIssue: 82,
     conclusion: '후보 없음. 세금 구조로 남는 건 연 0.1~0.2%p. 가장 큰 확실한 이득은 매매가 아니라 연금 세액공제(사람의 가계 결정).',
