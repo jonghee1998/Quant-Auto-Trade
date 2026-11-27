@@ -626,12 +626,93 @@ def _round6(a, conn, prices, fx, mf, sha, out: Path) -> int:
     return 0 if any("error" not in r for r in res["rows"]) else 1
 
 
+def _round7(a, conn, prices, fx, mf, sha, out: Path) -> int:
+    """7차(계획 #93): SSO 합성 2배 검산 → 긴 과거 관문(G0-M·G0-X) → M·E·X → 자격(개발)·통과(검증). 주문 코드 없음."""
+    from . import synthetic as SYN
+    from .features import asof_series
+    from .round7 import BENCH7, NOTE, PREV_TRIALS7, ROUND7, eligibility7, gate7, pass_table7, run_batch7, strip, table7
+    need = ["SPY", "SHY", "EFA", "IEF", "TLT"]
+    miss = [t for t in need if t not in prices or prices[t].first_valid_index() is None or prices[t].first_valid_index() > pd.Timestamp("2003-01-01")]
+    if miss:
+        print(f"멈춤: 2003-01-01 이전부터 있어야 하는 시세가 없다 {miss}")
+        return 1
+    macro = load_macro(conn, ["IR3TIB01KRM156N", "DTB3"])
+    idx = prices.index
+    kr3m, us3m = asof_series(macro["IR3TIB01KRM156N"], idx), asof_series(macro["DTB3"], idx)
+    div = load_div_yield(conn)
+    px = prices.copy()
+    px["KRWCASH"] = SYN.build(prices, fx, kr3m, us3m)["KRWCASH"]
+    # SSO: 2006-06 이전은 합성 2배로 잇는다. 검산은 개발 구간 안(2006-07~2017-12)에서만
+    syn2 = SYN.leveraged2x(prices["SPY"], us3m)
+    tr = {"n": 0, "g": None}
+    if "SSO" in prices and prices["SSO"].notna().any():
+        tr = SYN.same_day_slope(syn2, prices["SSO"].loc["2006-07-01":"2017-12-31"])
+    verdict = SYN.leverage_verdict(tr)
+    sso_ok = verdict["status"] == "확인됨"
+    if (verdict.get("deduct") or 0) > 0:
+        syn2 = SYN.haircut(syn2.dropna(), verdict["deduct"]).reindex(idx)
+    px["SSO"] = SYN.splice(syn2, prices["SSO"]).reindex(idx) if "SSO" in prices else syn2
+    print(f"SSO 합성 2배 검산: {verdict} (n {tr.get('n')}, 연 차이 {tr.get('g')})", flush=True)
+    gate = gate7(prices, us3m)
+    print(f"R7_G0 관문: M {gate['M'].get('pass')} · X {gate['X'].get('pass')} {gate.get('why', '')}", flush=True)
+    ids = {s.strip() for s in a.ids.split(",") if s.strip()}
+    exps = [e for e in ROUND7 if not ids or e.id in ids]
+    reg = DbRegistry(conn)
+    db_trials = reg.distinct_trials()
+    n = max(db_trials, PREV_TRIALS7 + 10)
+    res = run_batch7(px, fx, exps, BENCH7, period=a.period, div_yield=div, n_trials=n, log=lambda s: print(s, flush=True))
+    by = {r["id"]: r for r in res["rows"] if "error" not in r}
+    first = {t: (str(prices[t].first_valid_index().date()) if t in prices and prices[t].first_valid_index() is not None else None)
+             for t in ["SPY", "EFA", "EEM", "VNQ", "IEF", "TLT", "GLD", "DBC", "PDBC", "SHY", "SSO", "VFINX", "VWIGX", "VEIEX", "FRESX", "VFITX", "VUSTX"]}
+    g_short = {k: ({kk: vv for kk, vv in v.items() if kk != "episodes"} if isinstance(v, dict) else v) for k, v in gate.items()}
+    extra = {"SSO 합성 2배 검산(2006-07~2017-12, 같은 날 종가)": {"n": tr.get("n"), "g": tr.get("g"), "upper95": tr.get("upper95"), "verdict": verdict},
+             "R7_G0 긴 과거 관문": g_short,
+             "R7_G0 하락 목록(M: 정적 보유 −10% 초과 · X: S&P −15% 초과)": {k: gate[k].get("episodes") for k in ("M", "X")},
+             "시세 시작일": first}
+    if "DBC" in prices and "PDBC" in prices:
+        w = prices[["DBC", "PDBC"]].loc["2015-01-01":"2017-12-31"].dropna()
+        if len(w) > 250:
+            extra["DBC ↔ PDBC 2015~2017 연수익(실거래 대체 확인)"] = {t: float((w[t].iloc[-1] / w[t].iloc[0]) ** (252 / len(w)) - 1) for t in w}
+    if "R7_M1" in by and "R7_M4" in by:
+        k = next(iter(by["R7_M1"]["cond"]))
+        extra["R7_M4 확인(대피처 달러 − 원화 현금, 원화 최악 손실 차이)"] = by["R7_M1"]["cond"][k]["mdd"] - by["R7_M4"]["cond"][k]["mdd"]
+    elig = passes = None
+    if a.period == "dev":
+        elig = eligibility7(res, gate, sso_ok)
+        extra["2008-01~2009-06을 뺀 연수익(일수익 이어 붙임, 보고)"] = {i: {"s": r["cond"][next(iter(r["cond"]))].get("ex0809"),
+                                                              "spy": r["cond"][next(iter(r["cond"]))].get("bench_ex0809")} for i, r in by.items()}
+    else:
+        passes = pass_table7(res)
+    data_date = str(prices.index[-1].date())
+    for r in res["rows"]:
+        if r["benchmark"] or "error" in r:
+            continue
+        b = r["cond"][next(iter(r["cond"]))]
+        m = {k: v for k, v in b.items() if not k.startswith("_") and k not in ("windows7", "valid_drawdowns")}
+        m["conditions"] = {k: {kk: v.get(kk) for kk in ("liq_cagr", "mdd", "mdd_usd", "score", "trades")} for k, v in r["cond"].items()}
+        reg.add(Experiment(r["id"], r["hypothesis"], {"group": r["group"], "plan": PLAN_ISSUE, "static": r["static"]}, a.period, data_date,
+                           sha, _clean(m), False))
+    if not ids or "R7_G0" in ids:   # 관문도 시도 수에 넣는다(계획 #93: 82 + 10)
+        reg.add(Experiment("R7_G0", "긴 과거 관문(보고)", {"group": "보고", "plan": PLAN_ISSUE}, a.period, data_date, sha,
+                           _clean({"gate_M": gate["M"].get("pass"), "gate_X": gate["X"].get("pass"), "sso_ok": sso_ok}), False))
+    conn.commit()
+    strip(res)
+    md = table7(res, a.period, PLAN_ISSUE, elig, passes, extra)
+    meta = {"plan_issue": PLAN_ISSUE, "round": 7, "code_version": sha, "data_date": data_date, "period": a.period, "note": NOTE,
+            "n_trials": n, "db_distinct_trials": db_trials, "sso_ok": sso_ok, "dividend_days": int(div.notna().sum().sum()) if not div.empty else 0}
+    (out / f"forecast-{a.period}.md").write_text(md)
+    (out / f"forecast-{a.period}.json").write_text(json.dumps({"meta": meta, **res, "eligibility": elig, "passes": passes, "extra": extra, "gate": gate},
+                                                              ensure_ascii=False, default=str, indent=1))
+    print(md)
+    return 0 if any("error" not in r for r in res["rows"]) else 1
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--period", choices=["dev", "valid"], default="dev")
     ap.add_argument("--ids", default="", help="쉼표로 고르기(빈칸=2차 11개 전부, 기준선은 늘 같이)")
     ap.add_argument("--out", default="lab-out")
-    ap.add_argument("--round", type=int, choices=[1, 2, 3, 4, 5, 6], default=6)
+    ap.add_argument("--round", type=int, choices=[1, 2, 3, 4, 5, 6, 7], default=7)
     a = ap.parse_args()
     url = os.environ.get("DATABASE_URL")
     if not url:
@@ -655,6 +736,8 @@ def main() -> int:
             return _round5(a, conn, prices, fx, mf, sha, out)
         if a.round == 6:
             return _round6(a, conn, prices, fx, mf, sha, out)
+        if a.round == 7:
+            return _round7(a, conn, prices, fx, mf, sha, out)
         div = load_div_yield(conn)
         pick = {s.strip() for s in a.ids.split(",") if s.strip()}
         exps = [e for e in ROUND2 if not pick or e.id in pick]

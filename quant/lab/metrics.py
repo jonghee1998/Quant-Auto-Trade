@@ -171,6 +171,21 @@ def drawdown_in(nav: pd.Series, start: str, end: str) -> float:
     return float((s / s.cummax() - 1).min()) if len(s) > 1 else float("nan")
 
 
+def cagr_excluding(nav: pd.Series, start: str, end: str) -> float:
+    """start~end 구간을 뺀 연수익: 날짜를 지우지 않고 남은 날의 일수익을 이어 붙인다(구간 앞뒤 값의 차이가 수익으로 새지 않게, 판정 #88)."""
+    r = nav.pct_change(fill_method=None).dropna()
+    keep = r.drop(r.loc[start:end].index)
+    if len(keep) < 2:
+        return float("nan")
+    return float((1 + keep).prod() ** (TRADING_DAYS / len(keep)) - 1)
+
+
+def max_drawdown_usd(nav_krw: pd.Series, fx: pd.Series) -> float:
+    """원화 평가액을 그날 환율로 달러로 바꾼 뒤의 최악 손실(환율 덕을 뺀 손실)."""
+    f = fx.reindex(nav_krw.index).ffill()
+    return max_drawdown((nav_krw / f).dropna())
+
+
 def summary(nav: pd.Series, bench: pd.Series) -> dict:
     return {
         "cagr": cagr(nav),

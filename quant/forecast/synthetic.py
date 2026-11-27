@@ -122,3 +122,41 @@ def tracking_verdict6(main: dict, check: dict | None) -> dict:
         if not ((g >= 0) == (gc >= 0) or (abs(g) <= 0.003 and abs(gc) <= 0.003)):
             return {"status": "확인 못 함", "deduct": None, "why": "확인용 종목과 부호 다름"}
     return {"status": "확인됨", "deduct": max(0.0, g)}
+
+
+def leveraged2x(spy: pd.Series, us3m: pd.Series, fee: float = 0.0089, spread: float = 0.005) -> pd.Series:
+    """7차(계획 #93) 합성 2배: 일수익 = S&P 일수익 × 2 − (전날 3개월 국채 금리 + spread) ÷ 252 − fee ÷ 252. us3m은 % 단위(그날 알 수 있던 값)."""
+    s = spy.dropna()
+    u = us3m.reindex(s.index).ffill().shift(1) / 100
+    r = 2 * s.pct_change(fill_method=None) - (u + spread) / 252 - fee / 252
+    ok = r.notna()
+    if not ok.any():
+        return pd.Series(np.nan, index=spy.index)
+    r = r.loc[ok.idxmax():]
+    out = (1 + r.fillna(0.0)).cumprod() * 100.0
+    return out.reindex(spy.index)
+
+
+def splice(synth: pd.Series, real: pd.Series) -> pd.Series:
+    """실제 시세가 생긴 날부터는 실제, 그 전은 합성(그날 값이 이어지게 비율만 맞춤)."""
+    real = real.dropna()
+    if real.empty:
+        return synth.copy()
+    d = real.index[0]
+    if d not in synth.index or pd.isna(synth.loc[d]):
+        return real.reindex(synth.index)
+    head = synth.loc[:d].iloc[:-1] * (real.iloc[0] / synth.loc[d])
+    return pd.concat([head, real]).reindex(synth.index.union(real.index)).sort_index()
+
+
+def same_day_slope(synth: pd.Series, real: pd.Series, lags: int = 20) -> dict:
+    """같은 시장·같은 날 종가끼리: log(합성 ÷ 실제)의 연 기울기(Newey-West). tracking_trend의 '하루 앞 값 맞추기'만 뺀 것."""
+    return tracking_trend(synth.shift(-1), real, lags)
+
+
+def leverage_verdict(tr: dict, tol: float = 0.005) -> dict:
+    """계획 #93: 합성 2배와 실제 SSO의 연 차이가 tol 안이면 '확인됨'(합성이 더 좋으면 그만큼 깎음), 그 밖·표본 750일 미만은 '확인 못 함'."""
+    g = tr.get("g")
+    if g is None or tr.get("n", 0) < 750 or abs(g) > tol:
+        return {"status": "확인 못 함", "deduct": None}
+    return {"status": "확인됨", "deduct": max(0.0, g)}
