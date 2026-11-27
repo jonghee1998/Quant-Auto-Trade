@@ -49,7 +49,7 @@ export default function LabPage() {
           <h2>{r.round}차 · {r.title} <span className="sub">({r.exps.length}개)</span></h2>
           <div style={{ marginTop: 4, fontSize: 14 }}>{r.conclusion}</div>
           <div className="sub" style={{ marginTop: 4 }}>
-            개발 2010~17 · {r.basis} · <a href={REPO + r.judgeIssue}>판정 #{r.judgeIssue}</a>
+            {r.basis} · <a href={REPO + r.judgeIssue}>판정 #{r.judgeIssue}</a>
           </div>
           {r.exps.map((e) => <Exp key={e.id} e={e} />)}
         </section>
