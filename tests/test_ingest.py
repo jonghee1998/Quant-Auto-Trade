@@ -347,3 +347,17 @@ def test_kr_daily_shares_only_when_asked():
         {"basDt": "20240102", "srtnCd": "TEST01", "itmsNm": "가짜종목A", "clpr": "100", "lstgStCnt": "1,000"}]}}}}
     assert "shares" not in S.kr_daily(FakeFetch((200, body)), "stock", date(2024, 1, 2), "FAKE")[0]
     assert S.kr_daily(FakeFetch((200, body)), "stock", date(2024, 1, 2), "FAKE", with_shares=True)[0]["shares"] == 1000.0
+
+
+def test_market_monthly_rate_uses_month_plus_lag_not_alfred():
+    """한국 3개월 금리(시장 금리 월평균)는 ALFRED 빈티지 대신 기준일 + 45일에 알 수 있던 값으로(계획 #73)."""
+    from quant.ingest import sources as S
+    seen = {}
+
+    def fetch(url, params=None, headers=None, *a, **kw):
+        seen.update(params or {})
+        from quant.ingest.http import Response
+        import json
+        return Response(200, json.dumps({"observations": [{"date": "2005-01-01", "value": "3.5", "realtime_start": "2015-06-01"}]}))
+    rows = S.fred_series(fetch, "IR3TIB01KRM156N", __import__("datetime").date(2005, 1, 1), "TESTKEY")
+    assert "output_type" not in seen and rows[0]["release_date"] == "2005-02-15"

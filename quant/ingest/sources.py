@@ -48,9 +48,11 @@ def tiingo_daily(fetch: Fetch, ticker: str, start: date, end: date, token: str) 
 
 
 # ---------------------------------------------------------------- 매크로·VIX: FRED
-FRED_WEEKLY_RELEASE = {"DTWEXBGS", "DEXKOUS"}  # 일별 값이지만 H.10 보고서로 주 1회 묶어 발표
+FRED_WEEKLY_RELEASE = {"DTWEXBGS", "DEXKOUS"}
+# 시장 금리의 월평균(사후 수정 없음): ALFRED 빈티지가 늦게 시작해도 '그 달 끝 + 15일'에 알 수 있던 값으로 본다(계획 #73)
+FRED_MARKET_MONTHLY = {"IR3TIB01KRM156N"}  # 일별 값이지만 H.10 보고서로 주 1회 묶어 발표
 FRED_DAILY = {"VIXCLS", "VXVCLS", "DEXKOUS", "DGS10", "DGS2", "T10Y2Y", "T10Y3M", "DFF", "BAMLH0A0HYM2",
-              "USEPUINDXD", "WLEMUINDXD", "DTWEXBGS", "DCOILWTICO", "T5YIE", "DFII10", "BAMLC0A0CM", "BAA10Y"}
+              "USEPUINDXD", "WLEMUINDXD", "DTWEXBGS", "DCOILWTICO", "T5YIE", "DFII10", "BAMLC0A0CM", "BAA10Y", "DTB3"}
 
 
 def fred_series(fetch: Fetch, series: str, start: date, api_key: str) -> list[dict]:
@@ -64,11 +66,12 @@ def fred_series(fetch: Fetch, series: str, start: date, api_key: str) -> list[di
     """
     params = {"series_id": series, "observation_start": start.isoformat(), "api_key": api_key, "file_type": "json"}
     daily = series in FRED_DAILY
-    if not daily:
+    market_monthly = series in FRED_MARKET_MONTHLY
+    if not daily and not market_monthly:
         # 일간 시장 시리즈는 빈티지가 수천 개라 FRED가 거절(최대 2,000) → 다음 날 발표로 보고 첫 발표값 조회는 월간·주간만
         params.update({"realtime_start": "1776-07-04", "realtime_end": "9999-12-31", "output_type": 4})
     data = get_json(fetch, "https://api.stlouisfed.org/fred/series/observations", params, source="fred")
-    lag = timedelta(days=7 if series in FRED_WEEKLY_RELEASE else 1 if daily else 35)
+    lag = timedelta(days=7 if series in FRED_WEEKLY_RELEASE else 1 if daily else 45 if market_monthly else 35)
     rows = []
     for o in data.get("observations", []):
         v = _num(o.get("value"))
@@ -76,7 +79,7 @@ def fred_series(fetch: Fetch, series: str, start: date, api_key: str) -> list[di
             continue
         ref = date.fromisoformat(o["date"])
         rel = date.fromisoformat(o.get("realtime_start") or o["date"])
-        if daily or rel < ref:  # 일간은 다음 날(또는 주간 발표 7일), 기록이 이상하면(발표일 < 기준일) 보수적으로
+        if daily or market_monthly or rel < ref:  # 일간은 다음 날(또는 주간 발표 7일), 기록이 이상하면(발표일 < 기준일) 보수적으로
             rel = ref + lag
         rows.append({"series": series, "ref_date": o["date"], "release_date": rel.isoformat(), "value": v, "source": "fred"})
     return rows
