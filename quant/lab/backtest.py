@@ -46,10 +46,7 @@ class BacktestResult:
 def _check_inputs(prices: pd.DataFrame, fx: pd.Series) -> pd.Series:
     if not prices.index.is_monotonic_increasing or prices.index.has_duplicates:
         raise ValueError("prices 날짜는 중복 없이 오름차순이어야 한다")
-    fx = fx.reindex(prices.index).ffill()  # 앞으로만 채운다(미래 환율 금지)
-    if fx.isna().any():
-        raise ValueError("시작 구간 환율이 없다: 환율을 상수로 대신 채우지 않는다")
-    return fx
+    return fx.reindex(prices.index).ffill()  # 앞으로만 채운다(미래 환율 금지)
 
 
 def _rebalance_days(index: pd.DatetimeIndex, rule: str) -> set[pd.Timestamp]:
@@ -85,6 +82,9 @@ def run_backtest(
     idx = prices.index[mask]
     if len(idx) < 2:
         raise ValueError("구간에 거래일이 2일 이상 있어야 한다")
+    # 환율은 평가(원화 환산)에만 쓰므로 백테스트 구간 안에서만 있으면 된다(신호용 과거 시세는 환율보다 길 수 있다)
+    if fx.loc[idx].isna().any():
+        raise ValueError("구간 안에 환율이 없는 날이 있다: 환율을 상수로 대신 채우지 않는다")
     rebal = _rebalance_days(idx, rebalance)
     cash = float(capital_krw)
     shares: dict[str, float] = {}
