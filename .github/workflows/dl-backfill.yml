@@ -1,0 +1,36 @@
+name: dl-backfill
+# 딥러닝 트랙(Fable 설계 #74) 시세 백필: S&P 500 과거 구성종목 표본 200개(사라진 종목 포함)를 Tiingo에서 받아 Cloudflare R2에 파일로.
+# Tiingo 무료 한도(시간당 50건) 때문에 한 시간에 40개씩. 매일 수집(05:37·09:07 UTC)과 같은 시간대는 피한다. 다 받으면 아무것도 안 한다.
+# 필요한 Secrets: TIINGO_TOKEN, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT, R2_BUCKET (없으면 건너뜀)
+on:
+  schedule:
+    - cron: '23 0-4,6-8,10-23 * * *'
+  workflow_dispatch:
+    inputs:
+      batch: { description: '한 번에 받을 종목 수', default: '40' }
+permissions:
+  contents: read
+concurrency:
+  group: dl-backfill
+  cancel-in-progress: false
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -q -r requirements.txt
+      - name: Backfill
+        env:
+          TIINGO_TOKEN: ${{ secrets.TIINGO_TOKEN }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          BATCH: ${{ inputs.batch || '40' }}
+        run: python -m quant.dl.backfill --batch "$BATCH" --n 200

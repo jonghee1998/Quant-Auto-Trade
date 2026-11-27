@@ -18,3 +18,9 @@
 
 ## 화면 배포 (Cloudflare Workers, 무료)
 `deploy-cf.yml`이 main의 화면 변경마다 배포한다. Secrets: `CLOUDFLARE_API_TOKEN`(템플릿 "Edit Cloudflare Workers"), `CLOUDFLARE_ACCOUNT_ID`. 주소는 `https://quant-auto-trade.<계정 하위도메인>.workers.dev`. `DATABASE_URL`이 있으면 Worker 비밀값으로 넣어 실데이터를 보여 준다(없으면 예시 값).
+
+## 딥러닝 트랙 (Fable 설계 #74)
+
+- **S&P 500 과거 구성종목**: GitHub `fja05680/sp500`의 `sp500_ticker_start_end.csv`(MIT), 커밋 `a2430f2`로 고정(`quant/dl/members.py`). 2003~2022에 한 번이라도 지수에 있었던 종목에서 기호 SHA-256 순으로 200개(성적과 무관 → 생존 편향 없음).
+- **시세**: Tiingo 일봉(1998~2022) → **Cloudflare R2**(`dl/prices/<기호>.parquet`, DB에는 안 넣음 — Neon 무료 512MB 보호). `dl-backfill` 워크플로가 한 시간에 40개씩. 받은 범위·없음은 `dl/manifest.json`, 0단계 자료 관문(시세 확보 90%·사라진 종목 85%)은 `dl/status.json`.
+- Secrets: `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_ENDPOINT`, `R2_BUCKET`(이름만 적는다).
