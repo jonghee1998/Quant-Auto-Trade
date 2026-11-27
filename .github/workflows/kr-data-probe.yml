@@ -1,0 +1,45 @@
+name: kr-data-probe
+# 국내 시세 자료 점검(수동 실행): 국내 종목 갈아타기 실험을 설계하기 전에 자료 관문 숫자만 잰다. 전략 성과는 계산하지 않는다.
+# 관문 숫자는 quant/lab/kr_probe.py 의 GATES 에 실행 전에 고정했다. 결과는 건수·비율만(종목 이름·코드 없음).
+# 필요한 Secrets: DATA_GO_KR_KEY (없으면 포털 부분만 건너뜀). FinanceDataReader 는 이 점검에서만 쓰므로 여기서만 설치한다.
+run-name: "kr-data-probe n=${{ inputs.n }}"
+on:
+  workflow_dispatch:
+    inputs:
+      n: { description: '사라진 종목 표본 수', default: '50' }
+      issue: { description: '결과를 댓글로 남길 Issue 번호(선택)', default: '' }
+permissions:
+  contents: read
+  issues: write
+concurrency:
+  group: kr-data-probe
+  cancel-in-progress: false
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -q -r requirements.txt finance-datareader==0.9.202
+      - name: Probe
+        env:
+          DATA_GO_KR_KEY: ${{ secrets.DATA_GO_KR_KEY }}
+          N: ${{ inputs.n || '50' }}
+        run: |
+          set -o pipefail  # tee가 파이썬 실패를 가리지 않게
+          [[ "$N" =~ ^[0-9]+$ ]] || { echo "n 은 숫자"; exit 1; }
+          python -m quant.lab.kr_probe --n "$N" | tee "$RUNNER_TEMP/card.md"
+          cat "$RUNNER_TEMP/card.md" >> "$GITHUB_STEP_SUMMARY"
+      - name: Comment on the Issue
+        if: inputs.issue != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ inputs.issue }}
+        run: |
+          [[ "$ISSUE" =~ ^[0-9]+$ ]] || { echo "Issue 번호가 아님"; exit 0; }
+          gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/card.md"

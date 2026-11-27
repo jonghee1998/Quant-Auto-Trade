@@ -1,6 +1,6 @@
 # PM 인수인계
 
-_마지막 갱신: 2026-11-25 (수집·화면 프로토타입·실험실 흐름)_
+_마지막 갱신: 2026-11-27 (실험실 방향 전환·국내 자료 점검)_
 
 ## 현재 상태
 - 엔진이 아직 멈춰 있어(Claude 토큰·codex-login·ORCH_PAUSED) PM이 직접 PR로 만들었다:
@@ -13,13 +13,14 @@ _마지막 갱신: 2026-11-25 (수집·화면 프로토타입·실험실 흐름)
 - 엔진 Fable 지원(`model: "fable"`, `ORCH_FABLE`)은 AO #374·PD #136·Quant #3.
 
 ## 결정한 것 (사용자)
-- 미국 중심, 기준선은 미국 상장 S&P 500 ETF 보유. 개별주·ETF 둘 다 검증. 한국은 현황·뉴스용.
+- 기준선은 미국 상장 S&P 500 ETF 보유(세후·원화). 개별주·ETF 둘 다 검증. 2026-11-27: 국내 시장도 실험 대상(양도세 없음), 세금·계좌 구조 묶음은 닫고 '자동으로 돌아가는 수익 로직'만 설계한다.
 - 저장소 공개, 내부 데이터는 DB에 두고 토큰으로 접근. DB는 Neon 무료, 파일은 R2.
 - 뉴스 요약에 유료 AI 쓰지 않음. 기존 GCP 앱은 다 끝난 뒤 종료.
 - 화면은 개발 전에 시안을 먼저 보여 주고 승인받는다.
 - 실전 매매(6단계)와 주문 코드 변경은 자동 모드여도 사람이 승인한다.
 
 ## 다음 할 일
+0. 실험실: `kr-data-probe` 실행 → 관문 통과면 국내 종목 갈아타기 설계(lab-fable design), 미달이면 국내 업종 ETF 갈아타기·ETF 추세추종만. 후보·닫은 것은 `docs/LAB_RESULTS.md` '7차 준비'.
 1. 사람: Claude 토큰·codex-login·`ORCH_PAUSED` 삭제, 데이터 키(DATABASE_URL·TIINGO_TOKEN·FRED_API_KEY·DATA_GO_KR_KEY·NAVER_*·FINNHUB_TOKEN·SEC_USER_AGENT), Vercel 연결(0.13, 서버 환경변수 DATABASE_URL).
 2. PM: 키가 들어오면 `ingest` 수동 실행(days=400) → `lab-run trend_filter dev`로 첫 실측 → 결과를 투자 탭에 연결.
 3. 엔진 가동 후 계획: 휴장일 달력, 한국 지수·업종, 화면의 종목 상세(통계·재무) 실데이터, 투자 탭을 experiments 표와 연결, 모의투자(KIS 모의) 실행 확인.
