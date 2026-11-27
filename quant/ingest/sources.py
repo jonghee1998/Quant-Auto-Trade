@@ -175,6 +175,38 @@ def kr_daily(fetch: Fetch, kind: str, bas_dt: date, service_key: str, page_size:
         page += 1
 
 
+# 검산용 국내 상장 S&P500 ETF(실험실 5차, 계획 #79): 이름으로 고른다 — 레버리지·인버스·커버드콜·채권혼합 등은 뺀다
+KR_TRACK_NAME = re.compile(r"^(TIGER|KODEX|ACE|RISE|KBSTAR|SOL|KIWOOM|KOSEF|HANARO|1Q|PLUS) ?미국S&P500(TR)?(\(H\))?$")
+
+
+def kr_etf_history(fetch: Fetch, start: date, end: date, service_key: str, like: str = "S&P500", page_size: int = 1000) -> list[dict]:
+    """이름에 like가 든 ETF의 기간 일별 종가(공공데이터포털 증권상품시세, 기간 조회). 검산용 종목 이름 규칙만 남긴다."""
+    service_key = kr_service_key(service_key)
+    rows, page = [], 1
+    while True:
+        data = get_json(fetch, KR_ENDPOINTS["etf"],
+                        {"serviceKey": service_key, "resultType": "json", "numOfRows": page_size, "pageNo": page,
+                         "likeItmsNm": like, "beginBasDt": start.strftime("%Y%m%d"),
+                         "endBasDt": (end + timedelta(days=1)).strftime("%Y%m%d")}, source="data.go.kr/etf_hist")
+        body = (data.get("response") or {}).get("body") or {}
+        items = (body.get("items") or {}).get("item") or []
+        if isinstance(items, dict):
+            items = [items]
+        for it in items:
+            name = (it.get("itmsNm") or "").strip()
+            close = _num(it.get("clpr"))
+            if not KR_TRACK_NAME.match(name) or close is None or close <= 0:
+                continue
+            d = it["basDt"]
+            rows.append({"market": "KR", "code": it["srtnCd"], "name": name, "kind": "etf", "date": f"{d[:4]}-{d[4:6]}-{d[6:]}",
+                         "open": _num(it.get("mkp")), "high": _num(it.get("hipr")), "low": _num(it.get("lopr")), "close": close,
+                         "adj_factor": 1.0, "volume": _num(it.get("trqu")), "source": "data.go.kr"})
+        total = int(body.get("totalCount") or 0)
+        if page * page_size >= total or not items:
+            return rows
+        page += 1
+
+
 # ---------------------------------------------------------------- 뉴스: Naver(한국), Finnhub(미국)
 NAVER_NEWS_URL = "https://naverapihub.apigw.ntruss.com/search/v1/news"
 
