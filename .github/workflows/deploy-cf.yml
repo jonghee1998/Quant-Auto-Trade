@@ -52,7 +52,7 @@ jobs:
         run: |
           base=https://quant-auto-trade.jonghee1998.workers.dev
           fail=0
-          for p in / /trend /invest /data /terms "/stock/SPY?m=W" /indicator/vix; do
+          for p in / /trend /invest /lab /data /terms "/stock/SPY?m=W" /indicator/vix; do
             code=$(curl -s -o body.html -w '%{http_code}' --max-time 30 "$base$p")
             echo "$code $p"
             if [ "$code" != "200" ]; then fail=1; echo "--- $p 응답 앞부분"; head -c 800 body.html | sed 's/<[^>]*>/ /g' | tr -s ' \n' ' '; echo; fi
