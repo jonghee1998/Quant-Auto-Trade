@@ -118,3 +118,15 @@ details.round[open] > summary .chev { transform:rotate(90deg); }
 /* 다른 화면으로 가는 한 줄 */
 .golink { display:flex; justify-content:space-between; align-items:center; gap:10px; }
 .golink .chev { color:var(--sub); }
+
+/* 선 차트: 누르면 그 날짜 값 */
+.spark { display: block; touch-action: pan-y; cursor: crosshair; }
+.sparkread { display: flex; align-items: baseline; gap: 8px; min-height: 22px; margin-bottom: 4px; }
+.sparkread .b { font-size: 16px; }
+.sparkread .sub:last-child { margin-left: auto; }
+.sparkdot { position: absolute; width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; border-radius: 50%; box-shadow: 0 0 0 2px var(--card, #fff); pointer-events: none; }
+
+/* 화면 넘어가는 동안 보이는 뼈대 */
+.skel { border-radius: 8px; background: linear-gradient(90deg, rgba(21,23,28,.06), rgba(21,23,28,.11), rgba(21,23,28,.06)); background-size: 200% 100%; animation: skel 1.1s linear infinite; }
+@keyframes skel { to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .skel { animation: none; } }

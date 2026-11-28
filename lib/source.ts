@@ -2,6 +2,7 @@
 // 서버에서만 실행한다. DATABASE_URL은 서버 환경변수(NEXT_PUBLIC_ 금지).
 import 'server-only';
 import { fromPayload, type MarketData } from './payload';
+import { memo } from './memo';
 
 export type { MarketData };
 
@@ -10,7 +11,12 @@ const SAMPLE: MarketData = {
   breadth: { above: 0, total: 0 }, news: [], universe: [], signals: null, coverage: {}, ai: {}, bench: { US: [null, null, null], KR: [null, null, null], W: [null, null, null] },
 };
 
-export async function getMarket(): Promise<MarketData> {
+/** 최신 요약. 하루 몇 번만 바뀌므로 1분은 기억해 둔다(실패·빈 값은 기억하지 않는다). */
+export function getMarket(): Promise<MarketData> {
+  return memo('market', 60_000, readMarket, (v) => !v.sample);
+}
+
+async function readMarket(): Promise<MarketData> {
   const url = process.env.DATABASE_URL;
   if (!url) return { ...SAMPLE, sampleReason: 'DB 미설정' };
   try {

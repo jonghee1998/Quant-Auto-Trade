@@ -1,4 +1,5 @@
 import 'server-only';
+import { memo } from './memo';
 
 export type Point = [string, number | null];
 export type PriceStats = { days: number; vol?: number | null; mdd?: number | null; high?: number | null; low?: number | null; pos?: number | null; ma200?: number | null; beta?: number | null };
@@ -8,7 +9,11 @@ export type Related = { id: string; name: string; value: number | null; state: s
 export type Detail = { date: string; chart: Point[]; stats?: PriceStats; fund?: Fund; level?: Level; related?: Related[] };
 
 /** 상세 화면 값 한 줄(item_detail). 없거나 DB를 못 읽으면 null — 화면은 '데이터 연결 중'. */
-export async function getDetail(key: string): Promise<Detail | null> {
+export function getDetail(key: string): Promise<Detail | null> {
+  return memo(`detail:${key}`, 300_000, () => readDetail(key), (v) => v !== null);
+}
+
+async function readDetail(key: string): Promise<Detail | null> {
   const url = process.env.DATABASE_URL;
   if (!url) return null;
   try {

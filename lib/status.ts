@@ -1,4 +1,5 @@
 import 'server-only';
+import { memo } from './memo';
 
 export type SourceStatus = {
   source: string; lastAt: string; lastStatus: string; lastRows: number; jobsLast: number; failedLast: number;
@@ -13,7 +14,11 @@ const NAMES: Record<string, string> = {
 export const sourceName = (s: string) => NAMES[s] ?? s;
 
 /** 수집 기록(ingest_runs) 최근 7일: 소스별 날마다 성공했나, 마지막 실행의 건수·실패. 오류 문구는 수집 때 이미 비밀값을 가렸다. */
-export async function getStatus(): Promise<DataStatus | null> {
+export function getStatus(): Promise<DataStatus | null> {
+  return memo('status', 60_000, readStatus, (v) => v !== null);
+}
+
+async function readStatus(): Promise<DataStatus | null> {
   const url = process.env.DATABASE_URL;
   if (!url) return null;
   try {

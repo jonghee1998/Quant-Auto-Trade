@@ -11,11 +11,12 @@ export const dynamic = 'force-dynamic';
 export default async function Stock({ params, searchParams }: { params: Promise<{ code: string }>; searchParams: Promise<{ m?: string }> }) {
   const { code } = await params;
   const { m } = await searchParams;
+  const early = m ? getDetail(`${m}:${code}`) : null; // 시장을 알면 요약과 동시에 읽는다
   const d = await getMarket();
   const item = d.universe.find((i) => i.code === code && (!m || i.market === m)) ?? d.universe.find((i) => i.code === code);
   const why = item ? d.ai.why?.[`${item.market}:${item.code}`] : undefined;
   const [whyFirst, ...whyRest] = sentences(why?.text);
-  const det = item ? await getDetail(`${item.market}:${item.code}`) : null;
+  const det = !item ? null : early && item.market === m ? await early : await getDetail(`${item.market}:${item.code}`);
   const st = det?.stats;
   const f = det?.fund;
   const KR = item?.market === 'KR';
@@ -68,7 +69,7 @@ export default async function Stock({ params, searchParams }: { params: Promise<
       {item && (st && st.days >= 20 ? (
         <section className="card">
           <h2>1년 흐름과 위험</h2>
-          {det && <Spark points={det.chart} />}
+          {det && <Spark points={det.chart} digits={KR ? 0 : 2} />}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: '10px 12px', marginTop: 12, fontSize: 13 }}>
             <Stat label="52주 위치" value={st.pos == null ? '—' : `${st.pos}%`} hint={`최저 ${num(st.low, 2)} ~ 최고 ${num(st.high, 2)} 사이(100% = 최고)`} />
             <Stat label="장기 추세" value={st.ma200 == null ? '—' : st.ma200 >= 0 ? '200일선 위' : '200일선 아래'} hint={st.ma200 == null ? '데이터 200일 미만' : `200일 평균보다 ${pct(st.ma200)}`} />
