@@ -9,6 +9,8 @@ html { -webkit-text-size-adjust: 100%; }
 body { margin:0; background:var(--bg); color:var(--ink); font-family:'IBM Plex Sans KR', 'Apple SD Gothic Neo', 'Noto Sans KR', system-ui, sans-serif;
   font-size:15px; line-height:1.5; font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased;
   word-break: keep-all; overflow-wrap: anywhere; text-wrap: pretty; }  /* 낱말 중간에서 끊지 않고, 마지막 줄에 한두 글자만 남지 않게 */
+/* 긴 본문 문단만 양쪽 끝을 맞춘다(낱말은 안 끊고 오른쪽이 들쭉날쭉하지 않게). 제목·한두 줄 설명은 그대로 */
+p:not(.lead):not(.sub), .brief .next .why { text-align: justify; }
 h1, h2 { text-wrap: balance; }
 a { color: inherit; text-decoration: none; }
 button { font: inherit; cursor: pointer; }
