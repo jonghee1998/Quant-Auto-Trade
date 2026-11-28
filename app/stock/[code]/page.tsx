@@ -1,10 +1,10 @@
 import Link from 'next/link';
-import { Back, Connecting, Planned } from '../../../components/ui';
+import { Back, Connecting, Planned, TermsLink } from '../../../components/ui';
 import { getMarket } from '../../../lib/source';
 import { getDetail } from '../../../lib/detail';
 import Spark from '../../../components/Spark';
 import Star from '../../../components/Star';
-import { num, pct, pp, tone } from '../../../lib/format';
+import { num, pct, pp, sentences, tone } from '../../../lib/format';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,6 +14,7 @@ export default async function Stock({ params, searchParams }: { params: Promise<
   const d = await getMarket();
   const item = d.universe.find((i) => i.code === code && (!m || i.market === m)) ?? d.universe.find((i) => i.code === code);
   const why = item ? d.ai.why?.[`${item.market}:${item.code}`] : undefined;
+  const [whyFirst, ...whyRest] = sentences(why?.text);
   const det = item ? await getDetail(`${item.market}:${item.code}`) : null;
   const st = det?.stats;
   const f = det?.fund;
@@ -41,20 +42,26 @@ export default async function Stock({ params, searchParams }: { params: Promise<
       </section>}
       {why ? (
         <>
-          <section className="card dark">
-            <div className="sub">{(item?.r[0] ?? 0) >= 0 ? '왜 올랐나' : '왜 내렸나'}, AI 해석(확신 {why.confidence})</div>
-            <p style={{ margin: '6px 0 0', fontSize: 15, lineHeight: 1.6 }}>{why.text}</p>
-            {why.tags.length > 0 && <div className="chips" style={{ marginTop: 8 }}>{why.tags.map((t) => <span key={t} className="tag">{t}</span>)}</div>}
+          <section className="card dark brief">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span className="sub">{(item?.r[0] ?? 0) >= 0 ? '왜 올랐나' : '왜 내렸나'}</span>
+              <span className={`tag ${why.confidence === '높음' ? 'ok' : why.confidence === '낮음' ? 'warn' : ''}`}>AI 해석, 확신 {why.confidence}</span>
+            </div>
+            <p className="lead" style={{ marginTop: 8, fontSize: 18, fontWeight: 600, lineHeight: 1.45, letterSpacing: '-0.01em' }}>{whyFirst}</p>
+            {whyRest.length > 0 && (
+              <div className="read" style={{ marginTop: 8 }}><ul>{whyRest.map((x) => <li key={x}>{x}</li>)}</ul></div>
+            )}
+            {why.tags.length > 0 && <div className="chips" style={{ marginTop: 12 }}>{why.tags.map((t) => <span key={t} className="tag">{t}</span>)}</div>}
           </section>
           <section className="card">
             <h2>근거</h2>
             {why.evidence.map((e) => (
               <div key={e.label} className="row" style={{ fontSize: 14, alignItems: 'flex-start' }}>
-                <span style={{ lineHeight: 1.5 }}><b>{e.type}</b> {e.label}</span>
-                {e.url && <a href={e.url} target="_blank" rel="noopener noreferrer" className="sub" style={{ flex: 'none' }}>출처 ↗</a>}
+                <span style={{ display: 'flex', gap: 8, alignItems: 'baseline', lineHeight: 1.5 }}><span className="tag" style={{ flex: 'none' }}>{e.type}</span><span>{e.label}</span></span>
+                {e.url && <a href={e.url} target="_blank" rel="noopener noreferrer" className="sub" style={{ flex: 'none', textDecoration: 'underline' }}>출처</a>}
               </div>
             ))}
-            <div className="sub" style={{ marginTop: 6 }}>해석은 AI가 쓴 거라 틀릴 수 있어요.</div>
+            <div className="sub" style={{ marginTop: 6 }}>AI 해석은 틀릴 수 있어요.</div>
           </section>
         </>
       ) : item && <div className="sub" style={{ margin: '12px 16px 0' }}>AI 해석은 트렌드 TOP 15 종목에만 매일 써요.</div>}
@@ -92,7 +99,7 @@ export default async function Stock({ params, searchParams }: { params: Promise<
       ) : <Connecting reason="재무는 다음 수집 뒤 채워져요" />) : item && (
         null
       )}
-      <div style={{ margin: '12px 16px 0' }}><Link href="/terms" className="sub">용어 풀이</Link></div>
+      <TermsLink />
     </main>
   );
 }

@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { Back, Connecting } from '../../../components/ui';
+import { Back, Connecting, TermsLink } from '../../../components/ui';
 import Spark from '../../../components/Spark';
 import { getMarket } from '../../../lib/source';
 import { getDetail } from '../../../lib/detail';
@@ -56,7 +56,8 @@ export default async function Indicator({ params }: { params: Promise<{ id: stri
           ))}
         </section>
       )}
-      <div className="muted" style={{ margin: '12px 16px 0' }}>출처: {SOURCE[id] ?? 'FRED'}. 백테스트는 발표일 이후에만 이 값을 씁니다. <Link href="/terms">용어 풀이</Link></div>
+      <div className="muted" style={{ margin: '12px 16px 0' }}>출처: {SOURCE[id] ?? 'FRED'}. 백테스트는 발표일 이후에만 이 값을 씁니다.</div>
+      <TermsLink />
     </main>
   );
 }

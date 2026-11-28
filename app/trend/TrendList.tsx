@@ -23,24 +23,28 @@ export default function TrendList({ universe: UNIVERSE, bench: BENCH, coverage =
   const what = market === 'W' ? '나라별' : `${market === 'US' ? '미국' : '한국'} ${kind === '업종' ? '업종 ETF' : '주식'}`;
   return (
     <>
-      <div className="seg">
-        <button type="button" className={strong ? 'on' : ''} onClick={() => setStrong(true)}>강한 곳</button>
-        <button type="button" className={!strong ? 'on' : ''} onClick={() => setStrong(false)}>약한 곳</button>
-      </div>
-      <div style={{ margin: '10px 16px 0', display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <div className="chips"><span className="sub" style={{ width: 34 }}>어디</span>
-          {MARKETS.map(([m, l]) => <button key={m} type="button" className={`chip ${market === m ? 'on' : ''}`} onClick={() => setMarket(m)}>{l}</button>)}
+      <div className="filters">
+        <div className="seg in" role="group" aria-label="시장">
+          {MARKETS.map(([m, l]) => <button key={m} type="button" className={market === m ? 'on' : ''} aria-pressed={market === m} onClick={() => setMarket(m)}>{l}</button>)}
         </div>
-        {market !== 'W' && (
-          <div className="chips"><span className="sub" style={{ width: 34 }}>무엇</span>
-            {(['업종', '주식'] as Kind[]).map((k) => <button key={k} type="button" className={`chip ${kind === k ? 'on' : ''}`} onClick={() => setKind(k)}>{k === '업종' ? '업종·ETF' : '주식'}</button>)}
+        <div className="pair">
+          {market !== 'W' && (
+            <div className="seg in sm" style={{ flex: 1 }} role="group" aria-label="종류">
+              {(['업종', '주식'] as Kind[]).map((k) => <button key={k} type="button" className={kind === k ? 'on' : ''} aria-pressed={kind === k} onClick={() => setKind(k)}>{k === '업종' ? '업종·ETF' : '주식'}</button>)}
+            </div>
+          )}
+          <div className="seg in sm" style={{ flex: 1.3 }} role="group" aria-label="기간">
+            {PERIODS.map((l, i) => <button key={l} type="button" className={period === i ? 'on' : ''} aria-pressed={period === i} onClick={() => setPeriod(i as 0 | 1 | 2)}>{l}</button>)}
           </div>
-        )}
-        <div className="chips"><span className="sub" style={{ width: 34 }}>기간</span>
-          {PERIODS.map((l, i) => <button key={l} type="button" className={`chip ${period === i ? 'on' : ''}`} onClick={() => setPeriod(i as 0 | 1 | 2)}>{l}</button>)}
         </div>
       </div>
-      <div style={{ margin: '16px 16px 0', fontSize: 16, fontWeight: 700 }}>{what}, {PERIODS[period]} {strong ? '상승' : '하락'} TOP 15</div>
+      <div style={{ margin: '18px 16px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+        <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600, letterSpacing: '-0.01em' }}>{what} TOP 15</h2>
+        <div className="seg fit sm" role="group" aria-label="정렬">
+          <button type="button" className={strong ? 'on' : ''} aria-pressed={strong} onClick={() => setStrong(true)}>상승</button>
+          <button type="button" className={!strong ? 'on' : ''} aria-pressed={!strong} onClick={() => setStrong(false)}>하락</button>
+        </div>
+      </div>
       {cov && (
         <div className="sub" style={{ margin: '4px 16px 0', lineHeight: 1.5 }}>
           {cov.total ? `전체 ${cov.total.toLocaleString()}종목 중 ${cov.note ?? ''} ${cov.shown}종목을 비교` : `${cov.note ?? ''} ${cov.shown}개를 비교`}
