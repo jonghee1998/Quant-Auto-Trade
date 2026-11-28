@@ -115,19 +115,31 @@ def test_match_news_needs_name_in_title_and_recent_date():
     assert [g["url"] for g in got] == ["https://e.example/1"] and got[0]["at"] == "2026-11-20"   # 같은 제목은 한 번, 미래·옛 기사 제외
 
 
-def test_naver_item_news_only_for_korean_stocks_short_on_news():
+def test_item_news_search_uses_naver_with_keys_else_google_news():
     from quant.brief import run as R
     from quant.ingest.http import Response
     calls = []
 
     def fetch(url, params=None, headers=None):
-        calls.append(params["query"])
+        if "news.google.com" in url:
+            calls.append(("google", params["q"]))
+            name = params["q"].split('"')[1]
+            return Response(200, f"""<rss><channel><item><title>{name} 공장 증설 - 합성일보</title><link>https://e.example/g</link>
+                <pubDate>Thu, 26 Nov 2026 10:00:00 +0900</pubDate><source>합성일보</source></item></channel></rss>""")
+        calls.append(("naver", params["query"]))
         return Response(200, json.dumps({"items": [{"title": f"{params['query']} 신제품 발표", "originallink": "https://e.example/n",
                                                     "pubDate": "Thu, 26 Nov 2026 10:00:00 +0900"}]}))
     items = [{"key": "KR:TEST01", "name": "가짜종목A", "market": "KR", "kind": "주식", "news": []},
              {"key": "KR:TEST02", "name": "가짜종목B", "market": "KR", "kind": "주식", "news": [{"title": "t"}] * 3},
              {"key": "US:FAKE1", "name": "Fake", "market": "US", "kind": "주식", "news": []}]
-    env = {"NAVER_CLIENT_ID": "FAKE-ID", "NAVER_CLIENT_SECRET": "FAKE-SECRET"}
-    got = R._naver_item_news(items, "2026-11-27", env, fetch)
-    assert calls == ["가짜종목A"] and list(got) == ["KR:TEST01"] and got["KR:TEST01"][0]["title"] == "가짜종목A 신제품 발표"
-    assert R._naver_item_news(items, "2026-11-27", {}, fetch) == {}     # 키 없으면 건너뜀
+    quiet = dict(log=lambda s: None, sleep=lambda s: None)
+    got = R._search_item_news(items, "2026-11-27", {"NAVER_CLIENT_ID": "FAKE-ID", "NAVER_CLIENT_SECRET": "FAKE-SECRET"}, fetch, **quiet)
+    assert calls == [("naver", "가짜종목A")] and got["KR:TEST01"][0]["title"] == "가짜종목A 신제품 발표"   # 뉴스 모자란 한국 주식만
+    calls.clear()
+    got = R._search_item_news(items, "2026-11-27", {}, fetch, **quiet)                                 # 키 없으면 구글 뉴스(최근 30일)
+    assert calls == [("google", '"가짜종목A" when:30d')] and got["KR:TEST01"][0] == {
+        "title": "가짜종목A 공장 증설", "url": "https://e.example/g", "publisher": "합성일보", "at": "2026-11-26"}
+
+    def broken(url, params=None, headers=None):
+        return Response(500, "x")
+    assert R._search_item_news(items * 4, "2026-11-27", {}, broken, **quiet) == {}                     # 실패해도 멈추지 않고 빈 값
