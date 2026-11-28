@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from ..snapshot import _home_ok
@@ -95,6 +95,44 @@ def trend_targets(universe: list[dict], bench: dict, n: int = TOP_N) -> dict[str
     return parts
 
 
+CHUNK = 22   # 한 번에 맡기는 종목 수. 2026-11-27: 한국 주식 66개를 한 번에 맡기자 AI가 조사 없이 전부 "이유를 못 찾았어요"로 채웠다
+
+
+def best_rank(e: dict) -> int:
+    """목록 순위 중 가장 높은 것("3개월 강한 2위" → 2). 순위 높은 종목부터 조사하게 한다."""
+    ranks = [int(m.group(1)) for x in e.get("lists", []) if (m := re.search(r"(\d+)위", x))]
+    return min(ranks) if ranks else 99
+
+
+def split_parts(parts: dict[str, list[dict]], size: int = CHUNK) -> dict[str, list[dict]]:
+    """종목이 size보다 많은 부분은 순위 높은 순으로 나눠 why-kr-stock-1, -2 … 로(부분마다 AI 작업 하나)."""
+    out: dict[str, list[dict]] = {}
+    for name, items in parts.items():
+        items = sorted(items, key=best_rank)
+        if len(items) <= size:
+            out[name] = items
+            continue
+        n = -(-len(items) // size)
+        for i in range(n):
+            out[f"{name}-{i + 1}"] = items[i::n]      # 조각마다 높은 순위가 고르게 들어가게
+    return out
+
+
+def match_news(name: str, rows: list[dict], day: str, limit: int = 6, days: int = 30) -> list[dict]:
+    """종목 이름으로 찾은 기사 중 제목에 이름이 있고 최근 days일 안인 것(같은 제목은 한 번만), 최신순 limit개."""
+    lo = (datetime.fromisoformat(day) - timedelta(days=days)).date().isoformat()
+    seen, out = set(), []
+    for r in sorted(rows, key=lambda r: str(r.get("published_at")), reverse=True):
+        at, title = str(r.get("published_at"))[:10], r.get("title") or ""
+        if name not in title or not (lo <= at <= day) or title in seen:
+            continue
+        seen.add(title)
+        out.append({"title": title, "url": r.get("url"), "publisher": r.get("publisher"), "at": at})
+        if len(out) >= limit:
+            break
+    return out
+
+
 # ---------------------------------------------------------------- 출력 검사
 class BriefError(ValueError):
     pass
@@ -161,7 +199,18 @@ def check_why(out: dict, inp: dict) -> dict:
                           "evidence": ev}
         except BriefError:
             continue  # 한 종목이 잘못돼도 나머지는 살린다
-    return {"items": items}
+    # 조사 없이 같은 문장을 여러 종목에 복사한 것은 버린다(화면에는 아무 말도 안 뜨는 편이 낫다). 이전 날 값도 지우게 키를 남긴다.
+    seen: dict[str, int] = {}
+    for x in items.values():
+        seen[_norm(x["text"])] = seen.get(_norm(x["text"]), 0) + 1
+    dropped = [k for k, x in items.items() if seen[_norm(x["text"])] >= 3 or (not x["evidence"] and x["confidence"] == "낮음")]
+    for k in dropped:
+        del items[k]
+    return {"items": items, "dropped": dropped}
+
+
+def _norm(text: str) -> str:
+    return re.sub(r"\s+", "", text)
 
 
 def merge(payload: dict, parts: dict[str, dict], generated_at: str | None = None, data_date: str | None = None) -> dict:
@@ -172,6 +221,8 @@ def merge(payload: dict, parts: dict[str, dict], generated_at: str | None = None
     why = dict(ai.get("why") or {})
     for name, part in parts.items():
         if name.startswith("why"):
+            for k in part.get("dropped", []):
+                why.pop(k, None)
             why.update(part["items"])
     ai["why"] = why
     ai["generatedAt"] = generated_at or datetime.now().astimezone().isoformat(timespec="minutes")
