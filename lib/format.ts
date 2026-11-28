@@ -37,3 +37,9 @@ export function moveLabel(change: Num, dailyStd: Num): '평소 수준' | '큰 �
   if (!ok(change) || !ok(dailyStd) || dailyStd <= 0) return '—';
   return Math.abs(change / dailyStd) >= 2 ? '큰 움직임' : '평소 수준';
 }
+
+/** 지표 값의 소수 자리: 금리(%)는 둘째 자리, VIX는 첫째 자리, 지수·환율은 정수. (4.21%가 "4%"로 보이던 문제) */
+export function quoteDigits(id: string, unit?: string): number {
+  if (unit === '%') return 2;
+  return id === 'vix' || id === 'vkospi' ? 1 : 0;
+}

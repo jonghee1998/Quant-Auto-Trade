@@ -33,3 +33,21 @@ test('실험마다 한 줄 요약·접근·결과가 다 있다', () => {
     for (const k of ['ret', 'bench', 'mdd', 'benchMdd']) assert.ok(Number.isFinite(e.dev[k]), `${e.id}.${k}`);
   }
 });
+
+test('성적판 집계: 판정별 개수와 칸 목록(오래된 라운드부터, 라운드 사이 빈칸)', async () => {
+  const { ROUNDS, labTally, divergeSpan } = await import('../lib/labRounds.ts');
+  const t = labTally();
+  const n = ROUNDS.reduce((a, r) => a + r.exps.length, 0);
+  assert.equal(t.total, n);
+  assert.equal(t.count.후보 + t.count.보류 + t.count.탈락, n);
+  assert.equal(t.cells.filter((c) => c === null).length, ROUNDS.length - 1);
+  const first = [...ROUNDS].sort((a, b) => a.round - b.round)[0];
+  assert.deepEqual(t.cells.slice(0, first.exps.length), first.exps.map((e) => e.v));
+  const two = labTally([{ round: 2, exps: [{ v: '탈락' }] }, { round: 1, exps: [{ v: '보류' }, { v: '후보' }] }]);
+  assert.deepEqual(two.cells, ['보류', '후보', null, '탈락']);
+  assert.deepEqual(two.count, { 후보: 1, 보류: 1, 탈락: 1 });
+  assert.deepEqual(divergeSpan(4, 8), { left: 50, width: 25, good: true });   // 좋은 쪽은 가운데에서 오른쪽으로
+  assert.deepEqual(divergeSpan(-4, 8), { left: 25, width: 25, good: false }); // 나쁜 쪽은 왼쪽으로
+  assert.deepEqual(divergeSpan(-99, 8), { left: 0, width: 50, good: false }); // 한계에서 자름
+  assert.deepEqual(divergeSpan(-0.1, 8), { left: 47, width: 3, good: false }); // 아주 작은 차이도 보이게
+});

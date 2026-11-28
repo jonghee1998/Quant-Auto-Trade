@@ -18,10 +18,10 @@ export default function WatchList({ universe, why }: { universe: Item[]; why: Re
   return (
     <section className="card">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-        <h2>관심 종목</h2><span className="sub">1개월 · 3개월</span>
+        <h2>관심 종목</h2><span className="sub">1개월, 3개월</span>
       </div>
       {ids !== null && items.length === 0 && (
-        <div className="sub" style={{ marginTop: 6, lineHeight: 1.5 }}>아래 목록에서 종목을 눌러 ☆를 누르면 여기에 항상 떠요. (이 기기에만 저장)</div>
+        <div className="sub" style={{ marginTop: 6, lineHeight: 1.5 }}>종목 화면에서 ☆를 누르면 여기에 떠요. 이 기기에만 저장돼요.</div>
       )}
       {items.map((u) => 'code' in u ? (
         <Link key={u.code + u.market} href={`/stock/${u.code}?m=${u.market}`} className="row" style={{ flexWrap: 'wrap' }}>
@@ -31,7 +31,7 @@ export default function WatchList({ universe, why }: { universe: Item[]; why: Re
           {why[`${u.market}:${u.code}`] && <div className="sub" style={{ width: '100%', lineHeight: 1.45 }}>{why[`${u.market}:${u.code}`].line} ›</div>}
         </Link>
       ) : (
-        <div key={u.id} className="row sub" style={{ fontSize: 13 }}>{u.id.split(':')[1]} · 오늘 화면 목록에 없어요(거래대금 순위 밖)</div>
+        <div key={u.id} className="row sub" style={{ fontSize: 13 }}>{u.id.split(':')[1]}은 오늘 목록에 없어요(거래대금 순위 밖)</div>
       ))}
     </section>
   );

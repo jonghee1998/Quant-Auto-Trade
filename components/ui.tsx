@@ -18,7 +18,7 @@ export function Connecting({ reason }: { reason?: string }) {
   return (
     <section className="card planned">
       <h2>데이터 연결 중</h2>
-      <div className="sub" style={{ marginTop: 4 }}>{reason ? `${reason} · ` : ''}매일 한국시간 14:37 수집 뒤 채워져요</div>
+      <div className="sub" style={{ marginTop: 4 }}>{reason ? `${reason}. ` : ''}매일 14:37(한국시간) 수집 뒤 채워져요</div>
     </section>
   );
 }

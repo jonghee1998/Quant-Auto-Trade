@@ -40,14 +40,14 @@ export default function TrendList({ universe: UNIVERSE, bench: BENCH, coverage =
           {PERIODS.map((l, i) => <button key={l} type="button" className={`chip ${period === i ? 'on' : ''}`} onClick={() => setPeriod(i as 0 | 1 | 2)}>{l}</button>)}
         </div>
       </div>
-      <div style={{ margin: '16px 16px 0', fontSize: 16, fontWeight: 700 }}>{what} · 최근 {PERIODS[period]} {strong ? '가장 많이 오른' : '가장 많이 내린'} TOP 15</div>
+      <div style={{ margin: '16px 16px 0', fontSize: 16, fontWeight: 700 }}>{what}, {PERIODS[period]} {strong ? '상승' : '하락'} TOP 15</div>
       {cov && (
         <div className="sub" style={{ margin: '4px 16px 0', lineHeight: 1.5 }}>
           {cov.total ? `전체 ${cov.total.toLocaleString()}종목 중 ${cov.note ?? ''} ${cov.shown}종목을 비교` : `${cov.note ?? ''} ${cov.shown}개를 비교`}
         </div>
       )}
       <section className="card" style={{ paddingTop: 0, paddingBottom: 0 }}>
-        {rows.length === 0 && <div className="row sub">— 아직 데이터가 없어요</div>}
+        {rows.length === 0 && <div className="row sub">아직 데이터가 없어요</div>}
                 {rows.map((r, i) => {
           const s = barSpan(r.ret, maxAbs);
           const t = tone(r.ret);
@@ -60,12 +60,12 @@ export default function TrendList({ universe: UNIVERSE, bench: BENCH, coverage =
                 <div style={{ position: 'absolute', top: -4, left: `${benchLeft}%`, width: 2, height: 16, background: 'var(--ink)' }} />
               </div>
               <span className={`${t} b`} style={{ width: 58, textAlign: 'right', fontSize: 14 }}>{pct(r.ret)}</span>
-              {why[`${r.market}:${r.code}`] && <div className="sub" style={{ width: '100%', paddingLeft: 26, lineHeight: 1.45 }}>{why[`${r.market}:${r.code}`].line} ›</div>}
+              {why[`${r.market}:${r.code}`] && <div className="sub" style={{ width: '100%', paddingLeft: 26, lineHeight: 1.45 }}>{why[`${r.market}:${r.code}`].line}</div>}
             </Link>
           );
         })}
       </section>
-      <div className="sub" style={{ margin: '8px 16px 0' }}>세로선 = {market === 'KR' ? '코스피' : 'S&P 500'} {pct(bench)}. 선 오른쪽이면 시장보다 잘함.</div>
+      <div className="sub" style={{ margin: '8px 16px 0' }}>세로선은 {market === 'KR' ? '코스피' : 'S&P 500'}({pct(bench)}). 오른쪽이면 시장보다 잘한 거예요.</div>
     </>
   );
 }

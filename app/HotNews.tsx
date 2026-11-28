@@ -25,7 +25,7 @@ export default function HotNews({ news }: { news: AiNews[] }) {
           {list.map((n) => (
             <Link key={n.id} href={`/news/${n.id}`} className="row" style={{ display: 'block' }}>
               <div style={{ fontSize: 14, lineHeight: 1.45 }}>{n.title}</div>
-              <div className="sub" style={{ marginTop: 2 }}>{n.where} · 언론사 {n.outlets}곳 보도 ›</div>
+              <div className="sub" style={{ marginTop: 2 }}>{n.where}, {n.outlets}곳 보도</div>
             </Link>
           ))}
         </div>

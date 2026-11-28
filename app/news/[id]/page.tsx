@@ -14,7 +14,7 @@ export default async function NewsDetail({ params }: { params: Promise<{ id: str
         <div style={{ padding: '0 16px' }}>
           <span className="tag">{n.cat}</span>
           <h1 style={{ fontSize: 20, lineHeight: 1.45, margin: '10px 0 0' }}>{n.title}</h1>
-          <div className="sub" style={{ marginTop: 6 }}>{n.where} · 언론사 {n.outlets}곳 보도 · AI가 번역·요약</div>
+          <div className="sub" style={{ marginTop: 6 }}>{n.where}, {n.outlets}곳 보도. AI가 번역하고 요약했어요.</div>
         </div>
         <section className="card">
           <h2>3줄 요약</h2>
@@ -31,7 +31,7 @@ export default async function NewsDetail({ params }: { params: Promise<{ id: str
               <span>{l.name}</span><span className="sub">원문 ↗</span>
             </a>
           ))}
-          <div className="sub" style={{ marginTop: 6 }}>요약은 AI가 쓴 거라 틀릴 수 있어요. 중요한 판단은 원문을 확인하세요.</div>
+          <div className="sub" style={{ marginTop: 6 }}>AI 요약은 틀릴 수 있어요. 중요한 판단은 원문으로 확인하세요.</div>
         </section>
       </>}
     </main>

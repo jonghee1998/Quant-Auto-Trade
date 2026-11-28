@@ -23,7 +23,7 @@ const V3 = (ret: number, mdd: number) => r(ret, 10.19, mdd, -25); // 3차 검증
 export const ROUNDS: Round[] = [
   {
     round: 7, title: '여러 자산 ETF 추세추종·수익 겹치기', planIssue: 93, judgeIssue: 96,
-    conclusion: '후보 없음, 검증을 열지 않고 종료. "오를 때만 들기"는 이번에도 뒷북 — 추세 없이 그냥 섞어 든 것보다 낮았다. 세금이 거의 없는 조건에서도 져서, 갈아타기가 지는 주된 이유는 세금이 아니라 뒷북 자체.',
+    conclusion: '후보 없음, 검증은 열지 않았다. 추세를 따라 갈아탄 쪽이 그냥 섞어 든 쪽보다 낮았다. 세금이 거의 없어도 져서, 지는 이유는 세금보다 뒷북이다.',
     basis: '개발 2004~17 · 1억 원·그날 다 팔고 세금 낸 뒤(원화) · 긴 과거 관문 1987~2003',
     exps: [
       { id: 'R7_X4', name: 'S&P 노출 100% + 방어 추세 30%', approach: 'SSO 30·SPY 40을 늘 들고 30%만 채권·금·원자재 추세(확인용)', v: '탈락', dev: D3(6.06, -31), note: '−0.11%p, 최악 손실은 S&P보다 깊음. 덜 얹을수록 그냥 S&P에 가까워질 뿐' },
@@ -159,3 +159,21 @@ export const ROUNDS: Round[] = [
     ],
   },
 ];
+
+/** 성적판용 집계: 판정별 개수와, 오래된 라운드부터 늘어놓은 판정 목록(라운드 사이는 null). */
+export function labTally(rounds: Round[] = ROUNDS): { total: number; count: Record<Verdict, number>; cells: (Verdict | null)[] } {
+  const count: Record<Verdict, number> = { 후보: 0, 보류: 0, 탈락: 0 };
+  const cells: (Verdict | null)[] = [];
+  for (const r of [...rounds].sort((a, b) => a.round - b.round)) {
+    if (cells.length) cells.push(null);
+    for (const e of r.exps) { count[e.v] += 1; cells.push(e.v); }
+  }
+  return { total: count.후보 + count.보류 + count.탈락, count, cells };
+}
+
+/** S&P 대비 막대의 위치(%): 차이를 ±limit로 자르고, 가운데(50%)에서 좋은 쪽은 오른쪽·나쁜 쪽은 왼쪽으로. */
+export function divergeSpan(diff: number, limit: number): { left: number; width: number; good: boolean } {
+  const w = Math.min(Math.abs(diff), limit) / limit * 50;
+  const ww = Math.max(w, 3);
+  return { left: diff >= 0 ? 50 : 50 - ww, width: ww, good: diff >= 0 };
+}
