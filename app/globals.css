@@ -14,7 +14,7 @@ a { color: inherit; text-decoration: none; }
 button { font: inherit; cursor: pointer; }
 :focus-visible { outline:2px solid var(--down); outline-offset:2px; border-radius:6px; }
 p { margin:0; }
-.page { max-width: 480px; margin: 0 auto; min-height: 100vh; padding-bottom: calc(76px + env(safe-area-inset-bottom)); }
+.page { max-width: 480px; margin: 0 auto; min-height: 100vh; padding-bottom: calc(104px + env(safe-area-inset-bottom)); }
 .planned { border:1px dashed var(--edge); background:transparent; }
 .proto { background: var(--warn-bg); color: var(--warn); font-size: 12px; text-align: center; padding: 6px; }
 .head { padding: 20px 16px 0; display:flex; justify-content:space-between; align-items:flex-end; }
@@ -40,11 +40,12 @@ p { margin:0; }
 .grid2 { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
 .cmp { display:grid; grid-template-columns:96px repeat(2,minmax(0,1fr)); gap:6px 8px; font-size:13px; }
 .bar { flex:1; height:8px; background:var(--line); border-radius:4px; position:relative; }
-.tabbar { position:fixed; bottom:0; left:0; right:0; background:rgba(255,255,255,.96); border-top:1px solid var(--edge); display:flex; justify-content:center; padding-bottom:env(safe-area-inset-bottom); }
-.tabbar > div { width:100%; max-width:480px; display:grid; grid-template-columns:repeat(2,1fr); }
-.tabbar a { text-align:center; padding:13px 0 15px; font-size:14px; color:var(--sub); position:relative; }
-.tabbar a.on { color:var(--ink); font-weight:600; }
-.tabbar a.on::before { content:''; position:absolute; top:-1px; left:50%; width:28px; margin-left:-14px; height:2px; background:var(--ink); }
+/* 아래 탭: 화면 맨 밑에 붙이지 않고 조금 띄운 알약 모양(엄지가 닿기 쉬운 높이) */
+.tabbar { position:fixed; left:0; right:0; bottom:calc(18px + env(safe-area-inset-bottom)); display:flex; justify-content:center; padding:0 16px; pointer-events:none; }
+.tabbar > div { pointer-events:auto; width:100%; max-width:300px; display:grid; grid-template-columns:repeat(2,1fr); gap:4px; padding:4px;
+  background:rgba(255,255,255,.97); border:1px solid var(--edge); border-radius:20px; box-shadow:0 8px 24px rgba(21,23,28,.14); }
+.tabbar a { text-align:center; height:42px; line-height:42px; border-radius:16px; font-size:14.5px; color:var(--sub); }
+.tabbar a.on { background:var(--ink); color:#fff; font-weight:600; }
 .back { display:inline-flex; align-items:center; height:44px; padding:0 16px; font-size:14px; color:var(--sub); }
 textarea, input[type=search] { width:100%; border:1px solid var(--edge); border-radius:11px; padding:11px 12px; font:inherit; font-size:14px; background:#fff; }
 .btn { height:40px; padding:0 16px; border-radius:10px; border:0; background:var(--ink); color:#fff; font-size:14px; }
@@ -94,3 +95,26 @@ details.round[open] > summary .chev { transform:rotate(90deg); }
 .brief .up { color:#FF8479; } .brief .down { color:#86B4FF; } .brief .flat { color:var(--dark-sub); }
 .brief .next { display:flex; gap:10px; align-items:baseline; margin-top:12px; padding-top:12px; border-top:1px solid var(--dark-line); font-size:14px; line-height:1.55; }
 .brief .next .tag { background:#2C3038; color:#E4E6EA; flex:none; }
+
+/* 작은 선택 막대(트렌드 필터) */
+.seg.in { margin:0; }
+.seg.sm > * { height:32px; line-height:32px; font-size:13px; border-radius:8px; padding:0 10px; white-space:nowrap; }
+.seg.fit { display:inline-flex; margin:0; }
+.seg.fit > * { flex:none; }
+.filters { display:flex; flex-direction:column; gap:8px; margin:12px 16px 0; }
+.filters .pair { display:flex; gap:8px; }
+
+/* AI 해석: 첫 문장을 크게, 나머지는 한 줄씩 */
+.read .first { font-size:15px; font-weight:500; line-height:1.55; }
+.read ul { list-style:none; margin:6px 0 0; padding:0; }
+.read li { position:relative; padding-left:12px; font-size:13.5px; line-height:1.6; color:var(--sub); }
+.read li::before { content:''; position:absolute; left:0; top:.72em; width:4px; height:4px; border-radius:2px; background:var(--edge); }
+.read + .read { margin-top:14px; padding-top:14px; border-top:1px solid var(--line); }
+.read h3 { margin:0 0 4px; font-size:12.5px; font-weight:600; color:var(--sub); }
+.dark .read li { color:#C9CDD4; } .dark .read li::before { background:#4A4F59; }
+.dark .tag { background:#2C3038; color:#E4E6EA; }
+.dark .tag.warn { background:#4A3A12; color:#F3D58A; } .dark .tag.ok { background:#173A27; color:#8FE0B0; }
+
+/* 다른 화면으로 가는 한 줄 */
+.golink { display:flex; justify-content:space-between; align-items:center; gap:10px; }
+.golink .chev { color:var(--sub); }

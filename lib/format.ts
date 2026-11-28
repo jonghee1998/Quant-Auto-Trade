@@ -43,3 +43,8 @@ export function quoteDigits(id: string, unit?: string): number {
   if (unit === '%') return 2;
   return id === 'vix' || id === 'vkospi' ? 1 : 0;
 }
+
+/** 글을 문장으로 나눈다(마침표·물음표·느낌표 뒤 공백 기준 — "5.2%" 같은 소수점은 끊지 않는다). */
+export function sentences(text: string | null | undefined): string[] {
+  return (text ?? '').split(/(?<=[.!?])\s+/).map((x) => x.trim()).filter(Boolean);
+}

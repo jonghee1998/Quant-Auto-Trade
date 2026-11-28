@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { tone, type Num } from '../lib/format';
+import { sentences, tone, type Num } from '../lib/format';
 
 /** 아직 만들지 않은 영역. 가짜 숫자 대신 무엇이 들어올지만 적는다. */
 export function Planned({ title, note }: { title: string; note: string }) {
@@ -49,4 +49,25 @@ export function Signed({ v, text, className = '' }: { v: Num; text: string; clas
 
 export function Back({ href, label }: { href: string; label: string }) {
   return <Link href={href} className="back">‹ {label}</Link>;
+}
+
+/** AI가 쓴 긴 글을 한눈에: 첫 문장은 크게, 나머지 문장은 한 줄씩. */
+export function Read({ title, text }: { title?: string; text: string }) {
+  const [first, ...rest] = sentences(text);
+  return (
+    <div className="read">
+      {title && <h3>{title}</h3>}
+      <p className="first">{first}</p>
+      {rest.length > 0 && <ul>{rest.map((x) => <li key={x}>{x}</li>)}</ul>}
+    </div>
+  );
+}
+
+export function TermsLink() {
+  return (
+    <Link href="/terms" className="card golink">
+      <span><span style={{ fontSize: 14, fontWeight: 500 }}>용어 풀이</span><br /><span className="sub">200일 평균선, 베타, PER 같은 말을 쉽게 풀었어요</span></span>
+      <span className="chev" aria-hidden="true">›</span>
+    </Link>
+  );
 }

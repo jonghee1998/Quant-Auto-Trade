@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { Connecting, TabBar, MarketSeg, Signed } from '../components/ui';
+import { Connecting, TabBar, MarketSeg, Read, Signed } from '../components/ui';
 import { getMarket } from '../lib/source';
 import { num, pct, moveLabel, quoteDigits, tone } from '../lib/format';
 import HotNews from './HotNews';
@@ -103,10 +103,10 @@ export default async function Today() {
       {AI.market && (
         <section className="card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}><h2>그래서 시장은</h2><span className="sub">AI 해석</span></div>
-          <dl className="kv" style={{ margin: '10px 0 0', fontSize: 14, lineHeight: 1.6 }}>
-            <dt>미국</dt><dd>{AI.market.us}</dd>
-            <dt>한국</dt><dd>{AI.market.kr}</dd>
-          </dl>
+          <div style={{ marginTop: 12 }}>
+            <Read title="미국" text={AI.market.us} />
+            <Read title="한국" text={AI.market.kr} />
+          </div>
           <div className="muted" style={{ marginTop: 10 }}>지표·신호등·뉴스 기준, {AI.generatedAt?.slice(5, 16).replace('-', '.').replace('T', ' ')} 작성</div>
         </section>
       )}

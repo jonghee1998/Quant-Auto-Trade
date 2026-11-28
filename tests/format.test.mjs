@@ -32,3 +32,11 @@ test('지표 값 소수 자리: 금리는 둘째 자리(4.21%가 4%로 보이지
   assert.equal(quoteDigits('usdkrw', '원'), 0);
   assert.equal(num(4.21, quoteDigits('us10y', '%')), '4.21');
 });
+
+test('문장 나누기: 마침표 뒤 공백에서만 끊고 소수점은 끊지 않는다', async () => {
+  const { sentences } = await import('../lib/format.ts');
+  assert.deepEqual(sentences('S&P 500이 5.2% 위에 있어요. 다만 불안해요. 왜일까요? 끝.'), ['S&P 500이 5.2% 위에 있어요.', '다만 불안해요.', '왜일까요?', '끝.']);
+  assert.deepEqual(sentences(''), []);
+  assert.deepEqual(sentences(null), []);
+  assert.deepEqual(sentences('한 문장'), ['한 문장']);
+});
