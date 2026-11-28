@@ -14,9 +14,9 @@ const SOURCE: Record<string, string> = {
 
 export default async function Indicator({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const d = await getMarket();
+  const [d, det0] = await Promise.all([getMarket(), getDetail(`Q:${id}`)]); // 둘을 동시에 읽는다
   const q = d.quotes.find((x) => x.id === id);
-  const det = q ? await getDetail(`Q:${id}`) : null;
+  const det = q ? det0 : null;
   const lv = det?.level;
   const dg = quoteDigits(id, q?.unit);
   return (
@@ -30,7 +30,7 @@ export default async function Indicator({ params }: { params: Promise<{ id: stri
       {q && (det && lv ? (
         <section className="card">
           <h2>1년 흐름</h2>
-          <Spark points={det.chart} />
+          <Spark points={det.chart} digits={dg} unit={q.unit ?? ''} />
           <div style={{ marginTop: 12 }}>
             <div className="sub">1년 중 위치 {lv.pos == null ? '—' : `${lv.pos}%`} (최저 {num(lv.low1, dg)} ~ 최고 {num(lv.high1, dg)})</div>
             <div className="bar" style={{ marginTop: 6 }}>
