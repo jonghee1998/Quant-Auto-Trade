@@ -1,8 +1,7 @@
-import { Fragment } from 'react';
 import Link from 'next/link';
 import { Connecting, TabBar, MarketSeg, Signed } from '../components/ui';
 import { getMarket } from '../lib/source';
-import { num, pct, moveLabel, quoteDigits } from '../lib/format';
+import { num, pct, moveLabel, quoteDigits, tone } from '../lib/format';
 import HotNews from './HotNews';
 
 export const dynamic = 'force-dynamic'; // 배포 때 만든 화면을 재사용하지 않고 요청마다 DB에서 읽는다
@@ -17,6 +16,7 @@ export default async function Today() {
   const green = TREND_LIGHT.state === 'green';
   const AI = d.ai;
   const SIG = d.signals;
+  const TOP = QUOTES.filter((q) => q.change != null).slice(0, 3); // 브리핑 아래 한 줄: 맨 위 지표 3개의 오늘 변화
   return (
     <main className="page">
       <div className="head">
@@ -27,26 +27,36 @@ export default async function Today() {
       </div>
       <MarketSeg on="today" />
       {d.sample ? <Connecting reason={d.sampleReason} /> : <>
-      {AI.today ? (
-        <section className="card dark">
-          <div className="sub">AI가 쓴 오늘 3줄</div>
-          <dl className="kv" style={{ margin: '10px 0 0', fontSize: 15, lineHeight: 1.6 }}>
-            <dt>무슨 일</dt><dd>{AI.today.what}</dd>
-            <dt>왜</dt>
-            <dd>{AI.today.why}
-              {AI.today.why_news[0] && <> <Link href={`/news/${AI.today.why_news[0]}`} style={{ color: '#9CC3FF', whiteSpace: 'nowrap' }}>근거 기사</Link></>}</dd>
-            {AI.today.next.map((x) => (
-              <Fragment key={x.what}><dt>다음</dt><dd>{x.what}. <span style={{ color: 'var(--dark-sub)' }}>{x.why}</span></dd></Fragment>
+      <section className="card dark brief">
+        <div className="sub" style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <span>오늘의 브리핑</span><span>{AI.today ? 'AI 작성' : ''}</span>
+        </div>
+        <p className="lead" style={{ marginTop: 8, fontSize: 20, fontWeight: 600, lineHeight: 1.42, letterSpacing: '-0.015em' }}>{AI.today ? AI.today.what : SUMMARY}</p>
+        {TOP.length > 0 && (
+          <div className="ticker">
+            {TOP.map((q) => (
+              <div key={q.id}>
+                <div className="sub">{q.name}</div>
+                <div className={`chg ${tone(q.change)}`}>{q.changeText ?? pct(q.change)}</div>
+              </div>
             ))}
-          </dl>
-        </section>
-      ) : (
-        <section className="card dark">
-          <div className="sub">오늘 한 줄</div>
-          <p style={{ margin: '4px 0 0', fontSize: 17, fontWeight: 600, lineHeight: 1.5 }}>{SUMMARY}</p>
-          <div className="sub" style={{ marginTop: 6 }}>AI 3줄은 매일 수집 뒤 채워져요</div>
-        </section>
-      )}
+          </div>
+        )}
+        {AI.today ? (
+          <>
+            <p style={{ marginTop: 12, fontSize: 14.5, lineHeight: 1.65, color: '#D9DCE2' }}>
+              {AI.today.why}
+              {AI.today.why_news[0] && <> <Link href={`/news/${AI.today.why_news[0]}`} style={{ color: '#9CC3FF', whiteSpace: 'nowrap' }}>근거 기사</Link></>}
+            </p>
+            {AI.today.next.map((x) => (
+              <div key={x.what} className="next">
+                <span className="tag">지켜볼 일</span>
+                <span><span style={{ fontWeight: 500 }}>{x.what}</span> <span style={{ color: 'var(--dark-sub)' }}>{x.why}</span></span>
+              </div>
+            ))}
+          </>
+        ) : <div className="sub" style={{ marginTop: 10 }}>AI 브리핑은 매일 수집 뒤 채워져요</div>}
+      </section>
       {SIG && SIG.items.length ? (
         <section className="card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

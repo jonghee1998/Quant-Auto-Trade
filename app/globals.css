@@ -83,3 +83,14 @@ details.round > summary::-webkit-details-marker { display:none; }
 details.round > summary .chev { color:var(--sub); transition:transform .15s; flex:none; }
 details.round[open] > summary .chev { transform:rotate(90deg); }
 @media (prefers-reduced-motion: reduce) { details.round > summary .chev { transition:none; } }
+
+/* 오늘의 브리핑: 큰 한 문장 → 오늘 변화 3칸 → 이유 → 지켜볼 일 */
+.brief { padding:16px 18px 16px; }
+.brief .ticker { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); margin-top:14px; border-top:1px solid var(--dark-line); border-bottom:1px solid var(--dark-line); }
+.brief .ticker > div { padding:10px 0 10px 12px; border-left:1px solid var(--dark-line); min-width:0; }
+.brief .ticker > div:first-child { padding-left:0; border-left:0; }
+.brief .ticker .sub { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.brief .ticker .chg { font-size:17px; font-weight:600; margin-top:1px; }
+.brief .up { color:#FF8479; } .brief .down { color:#86B4FF; } .brief .flat { color:var(--dark-sub); }
+.brief .next { display:flex; gap:10px; align-items:baseline; margin-top:12px; padding-top:12px; border-top:1px solid var(--dark-line); font-size:14px; line-height:1.55; }
+.brief .next .tag { background:#2C3038; color:#E4E6EA; flex:none; }
