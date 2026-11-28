@@ -40,3 +40,12 @@ test('문장 나누기: 마침표 뒤 공백에서만 끊고 소수점은 끊지
   assert.deepEqual(sentences(null), []);
   assert.deepEqual(sentences('한 문장'), ['한 문장']);
 });
+
+test('좁은 칸용 짧은 이름', async () => {
+  const { shortName } = await import('../lib/format.ts');
+  assert.equal(shortName('미국 S&P 500 (SPY)'), 'S&P 500');
+  assert.equal(shortName('미국 나스닥 100 (QQQ)'), '나스닥 100');
+  assert.equal(shortName('한국 코스피'), '코스피');
+  assert.equal(shortName('VIX (불안 지수)'), 'VIX');
+  assert.equal(shortName('미국'), '미국');
+});
