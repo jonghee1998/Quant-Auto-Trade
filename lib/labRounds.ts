@@ -159,3 +159,21 @@ export const ROUNDS: Round[] = [
     ],
   },
 ];
+
+/** 성적판용 집계: 판정별 개수와, 오래된 라운드부터 늘어놓은 판정 목록(라운드 사이는 null). */
+export function labTally(rounds: Round[] = ROUNDS): { total: number; count: Record<Verdict, number>; cells: (Verdict | null)[] } {
+  const count: Record<Verdict, number> = { 후보: 0, 보류: 0, 탈락: 0 };
+  const cells: (Verdict | null)[] = [];
+  for (const r of [...rounds].sort((a, b) => a.round - b.round)) {
+    if (cells.length) cells.push(null);
+    for (const e of r.exps) { count[e.v] += 1; cells.push(e.v); }
+  }
+  return { total: count.후보 + count.보류 + count.탈락, count, cells };
+}
+
+/** S&P 대비 막대의 위치(%): 차이를 ±limit로 자르고, 가운데(50%)에서 좋은 쪽은 오른쪽·나쁜 쪽은 왼쪽으로. */
+export function divergeSpan(diff: number, limit: number): { left: number; width: number; good: boolean } {
+  const w = Math.min(Math.abs(diff), limit) / limit * 50;
+  const ww = Math.max(w, 3);
+  return { left: diff >= 0 ? 50 : 50 - ww, width: ww, good: diff >= 0 };
+}
