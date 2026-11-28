@@ -58,29 +58,33 @@ def _fundamentals(conn, codes: list[str]) -> dict[str, list[dict]]:
     return out
 
 
-def _naver_item_news(items: list[dict], day: str, env, fetch=None, log=print) -> dict[str, list[dict]]:
-    """한국 주식: 입력 뉴스가 3개 미만이면 종목 이름으로 네이버 뉴스를 한 번 찾는다(키는 Secrets NAVER_CLIENT_ID·NAVER_CLIENT_SECRET, 없으면 건너뜀)."""
-    cid, sec = env.get("NAVER_CLIENT_ID"), env.get("NAVER_CLIENT_SECRET")
-    if not (cid and sec):
-        return {}
+def _search_item_news(items: list[dict], day: str, env, fetch=None, log=print, sleep=None) -> dict[str, list[dict]]:
+    """한국 주식: 입력 뉴스가 3개 미만이면 종목 이름으로 최근 뉴스를 한 번 찾는다.
+    네이버 키(Secrets NAVER_CLIENT_ID·NAVER_CLIENT_SECRET)가 있으면 네이버, 없으면 구글 뉴스 RSS(키 없음, 최근 30일)."""
+    import time
     from quant.ingest import sources as S
     from quant.ingest.http import HttpError, requests_fetch
-    fetch = fetch or requests_fetch()
-    out, fails = {}, 0
+    cid, sec = env.get("NAVER_CLIENT_ID"), env.get("NAVER_CLIENT_SECRET")
+    fetch, sleep = fetch or requests_fetch(), sleep or time.sleep
+    out, fails, asked = {}, 0, 0
     for e in items:
         if e["market"] != "KR" or e["kind"] != "주식" or len(e.get("news", [])) >= 3 or len(e["name"]) < 2:
             continue
         try:
-            rows = S.naver_news(fetch, e["name"], cid, sec, display=30)
-        except (HttpError, KeyError, ValueError) as ex:
+            asked += 1
+            rows = S.naver_news(fetch, e["name"], cid, sec, display=30) if cid and sec else S.google_news(fetch, f'"{e["name"]}"', when="30d")
+        except Exception as ex:  # noqa: BLE001 — 뉴스 보강은 실패해도 글쓰기는 계속(형식이 바뀐 RSS 포함)
             fails += 1
-            if fails >= 5:      # 키·한도 문제면 계속 두드리지 않는다
-                log(f"네이버 종목 뉴스: 실패 {fails}번 — 멈춤({type(ex).__name__})")
+            if fails >= 5:      # 키·한도·차단 문제면 계속 두드리지 않는다
+                log(f"종목 뉴스 찾기: 실패 {fails}번 — 멈춤({type(ex).__name__})")
                 break
             continue
         got = match_news(e["name"], rows, day)
         if got:
             out[e["key"]] = got
+        sleep(0.3)
+    if asked:
+        log(f"종목 뉴스 찾기({'네이버' if cid and sec else '구글 뉴스'}): {asked}종목 중 {len(out)}종목에서 찾음, 실패 {fails}")
     return out
 
 
@@ -110,7 +114,7 @@ def prepare(conn, d: Path, force: bool = True, env=os.environ, fetch=None) -> di
             e["news"] = news.get(e["key"], [])
             if e["key"] in fund:
                 e["fundamentals"] = fund[e["key"]]
-        extra = _naver_item_news(items, str(day), env, fetch)
+        extra = _search_item_news(items, str(day), env, fetch)
         for e in items:
             if e["key"] in extra:
                 have = {n["title"] for n in e["news"]}
