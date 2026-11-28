@@ -48,3 +48,9 @@ export function quoteDigits(id: string, unit?: string): number {
 export function sentences(text: string | null | undefined): string[] {
   return (text ?? '').split(/(?<=[.!?])\s+/).map((x) => x.trim()).filter(Boolean);
 }
+
+/** 좁은 칸에 쓰는 짧은 이름: '미국 S&P 500 (SPY)' → 'S&P 500', '한국 코스피' → '코스피'. */
+export function shortName(name: string): string {
+  const s = name.replace(/\s*\([^)]*\)\s*/g, ' ').trim().replace(/^(미국|한국)\s+/, '');
+  return s || name;
+}

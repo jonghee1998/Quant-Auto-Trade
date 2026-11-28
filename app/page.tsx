@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { Connecting, TabBar, MarketSeg, Read, Signed } from '../components/ui';
 import { getMarket } from '../lib/source';
-import { num, pct, moveLabel, quoteDigits, tone } from '../lib/format';
+import { num, pct, moveLabel, quoteDigits, sentences, shortName, tone } from '../lib/format';
 import HotNews from './HotNews';
 
 export const dynamic = 'force-dynamic'; // 배포 때 만든 화면을 재사용하지 않고 요청마다 DB에서 읽는다
@@ -16,6 +16,7 @@ export default async function Today() {
   const green = TREND_LIGHT.state === 'green';
   const AI = d.ai;
   const SIG = d.signals;
+  const [HEAD, ...REST] = sentences(AI.today ? AI.today.what : SUMMARY); // 첫 문장만 크게, 나머지는 본문으로
   const TOP = QUOTES.filter((q) => q.change != null).slice(0, 3); // 브리핑 아래 한 줄: 맨 위 지표 3개의 오늘 변화
   return (
     <main className="page">
@@ -31,12 +32,13 @@ export default async function Today() {
         <div className="sub" style={{ display: 'flex', justifyContent: 'space-between' }}>
           <span>오늘의 브리핑</span><span>{AI.today ? 'AI 작성' : ''}</span>
         </div>
-        <p className="lead" style={{ marginTop: 8, fontSize: 20, fontWeight: 600, lineHeight: 1.42, letterSpacing: '-0.015em' }}>{AI.today ? AI.today.what : SUMMARY}</p>
+        <p className="lead">{HEAD}</p>
+        {!AI.today && REST.length > 0 && <p className="body">{REST.join(' ')}</p>}
         {TOP.length > 0 && (
           <div className="ticker">
             {TOP.map((q) => (
               <div key={q.id}>
-                <div className="sub">{q.name}</div>
+                <div className="sub">{shortName(q.name)}</div>
                 <div className={`chg ${tone(q.change)}`}>{q.changeText ?? pct(q.change)}</div>
               </div>
             ))}
@@ -44,14 +46,15 @@ export default async function Today() {
         )}
         {AI.today ? (
           <>
-            <p style={{ marginTop: 12, fontSize: 14.5, lineHeight: 1.65, color: '#D9DCE2' }}>
-              {AI.today.why}
+            <p className="body">
+              {REST.length > 0 && <>{REST.join(' ')} </>}{AI.today.why}
               {AI.today.why_news[0] && <> <Link href={`/news/${AI.today.why_news[0]}`} style={{ color: '#9CC3FF', whiteSpace: 'nowrap' }}>근거 기사</Link></>}
             </p>
+            {AI.today.next.length > 0 && <div className="nexthead">지켜볼 일</div>}
             {AI.today.next.map((x) => (
               <div key={x.what} className="next">
-                <span className="tag">지켜볼 일</span>
-                <span><span style={{ fontWeight: 500 }}>{x.what}</span> <span style={{ color: 'var(--dark-sub)' }}>{x.why}</span></span>
+                <div className="what">{x.what}</div>
+                <div className="why">{x.why}</div>
               </div>
             ))}
           </>
@@ -61,7 +64,9 @@ export default async function Today() {
         <section className="card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h2 style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <span className="dot" style={{ borderRadius: 5, background: LIGHT[SIG.state ?? 'none'][0] }} />
+              <span className="lamp" aria-hidden="true">
+                {(['red', 'yellow', 'green'] as const).map((c) => <i key={c} className={SIG.state === c ? `on ${c}` : ''} />)}
+              </span>
               시장 신호등 {LIGHT[SIG.state ?? 'none'][1]}
             </h2>
             <span className="sub">{SIG.items.length}개 중 {SIG.good}개 좋음</span>

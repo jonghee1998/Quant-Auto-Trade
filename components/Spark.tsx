@@ -28,7 +28,8 @@ export default function Spark({ points, height = 120, digits = 2, unit = '' }: {
       <div className="sparkread" aria-live="polite">
         <span className="sub">{sel == null ? '최근' : ''} {shortDate(pts[i][0])}</span>
         <span className="b">{num(vals[i], digits)}{unit}</span>
-        <span className={`sub ${tone(fromStart)}`}>시작 대비 {pct(fromStart)}</span>
+        <span className={`sub ${tone(fromStart)}`}>{pct(fromStart)}</span>
+        <span className="sub legend">┄ 1년 전</span>
       </div>
       <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} preserveAspectRatio="none" role="img" className="spark"
         aria-label={`1년 흐름: ${pts[0][0]} ${vals[0]} → ${pts[last][0]} ${vals[last]}`}
@@ -42,7 +43,7 @@ export default function Spark({ points, height = 120, digits = 2, unit = '' }: {
         <span className="sparkdot" style={{ left: `${(x(i) / W) * 100}%`, top: y(vals[i]) - H, background: color }} />
       </div>
       <figcaption className="sub" style={{ display: 'flex', justifyContent: 'space-between' }}>
-        <span>{shortDate(pts[0][0])}</span><span>점선 = 1년 전 값 · 눌러서 날짜별 값 보기</span><span>{shortDate(pts[last][0])}</span>
+        <span>{shortDate(pts[0][0])}</span><span>{shortDate(pts[last][0])}</span>
       </figcaption>
     </figure>
   );
