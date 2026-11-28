@@ -77,11 +77,11 @@ export default function LabPage() {
       <Back href="/invest" label="투자" />
       <div className="head" style={{ paddingTop: 0, display: 'block' }}>
         <h1>실험실</h1>
-        <p className="sub" style={{ margin: '6px 0 0' }}>Fable이 설계하고 판정해요. 비교 대상은 S&amp;P 500 그냥 보유예요.</p>
+        <p className="sub" style={{ margin: '6px 0 0' }}>설계와 판정은 Fable, 기준은 S&amp;P 500 보유예요.</p>
       </div>
       <section className="card dark">
-        <p style={{ fontSize: 17, fontWeight: 600, lineHeight: 1.45, letterSpacing: '-0.01em' }}>
-          지금까지 {t.total}번 실험했고, S&amp;P 500을 이긴 후보는 {t.count.후보 ? `${t.count.후보}개예요` : '아직 없어요'}.
+        <p className="lead" style={{ fontSize: 17, fontWeight: 600, lineHeight: 1.45, letterSpacing: '-0.01em' }}>
+          실험 {t.total}번, S&amp;P 500을 이긴 후보는 {t.count.후보 ? `${t.count.후보}개예요` : '아직 없어요'}.
         </p>
         <div style={{ marginTop: 12 }}><LabMatrix /></div>
         <div className="sub" style={{ marginTop: 10, display: 'flex', gap: 14, flexWrap: 'wrap' }}>
@@ -89,10 +89,10 @@ export default function LabPage() {
           <span><i className="dot" style={{ background: '#E0A63A', marginRight: 5 }} />보류 {t.count.보류}</span>
           <span><i className="dot" style={{ background: '#3A3E47', marginRight: 5, outline: '1px solid var(--dark-line)' }} />탈락 {t.count.탈락}</span>
         </div>
-        <div className="sub" style={{ marginTop: 8 }}>칸 하나가 실험 하나, 왼쪽이 1차예요.</div>
+        <div className="sub" style={{ marginTop: 8 }}>칸 하나가 실험 하나. 1차부터 순서대로예요.</div>
       </section>
       <div className="sub" style={{ margin: '16px 16px 0', lineHeight: 1.55 }}>
-        막대는 S&amp;P 500과의 차이예요. 가운데 선이 S&amp;P이고, 오른쪽 초록이면 더 좋아요(수익은 더 높고 손실은 더 얕음).
+        막대는 S&amp;P 500과의 차이예요. 오른쪽 초록이면 더 나아요.
       </div>
       {ROUNDS.map((r, i) => <RoundCard key={r.round} r={r} open={i === 0} />)}
       <TabBar on="invest" />

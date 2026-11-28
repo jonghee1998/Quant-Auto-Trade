@@ -29,12 +29,12 @@ export default async function Today() {
       {d.sample ? <Connecting reason={d.sampleReason} /> : <>
       {AI.today ? (
         <section className="card dark">
-          <div className="sub">오늘 3줄 요약, AI가 데이터와 뉴스로 작성</div>
+          <div className="sub">AI가 쓴 오늘 3줄</div>
           <dl className="kv" style={{ margin: '10px 0 0', fontSize: 15, lineHeight: 1.6 }}>
             <dt>무슨 일</dt><dd>{AI.today.what}</dd>
             <dt>왜</dt>
             <dd>{AI.today.why}
-              {AI.today.why_news[0] && <> <Link href={`/news/${AI.today.why_news[0]}`} style={{ color: '#9CC3FF', whiteSpace: 'nowrap' }}>근거 기사 보기</Link></>}</dd>
+              {AI.today.why_news[0] && <> <Link href={`/news/${AI.today.why_news[0]}`} style={{ color: '#9CC3FF', whiteSpace: 'nowrap' }}>근거 기사</Link></>}</dd>
             {AI.today.next.map((x) => (
               <Fragment key={x.what}><dt>다음</dt><dd>{x.what}. <span style={{ color: 'var(--dark-sub)' }}>{x.why}</span></dd></Fragment>
             ))}
@@ -44,7 +44,7 @@ export default async function Today() {
         <section className="card dark">
           <div className="sub">오늘 한 줄</div>
           <p style={{ margin: '4px 0 0', fontSize: 17, fontWeight: 600, lineHeight: 1.5 }}>{SUMMARY}</p>
-          <div className="sub" style={{ marginTop: 6 }}>AI 3줄 요약은 매일 수집 뒤 채워져요</div>
+          <div className="sub" style={{ marginTop: 6 }}>AI 3줄은 매일 수집 뒤 채워져요</div>
         </section>
       )}
       {SIG && SIG.items.length ? (
@@ -64,7 +64,7 @@ export default async function Today() {
               </div>
             ))}
           </div>
-          <div className="muted" style={{ paddingTop: 8, borderTop: '1px solid var(--line)' }}>3개 다 좋으면 초록, 2개면 노랑, 1개 이하면 빨강이에요. 지금 상태를 보여줄 뿐 매매 신호가 아니에요.</div>
+          <div className="muted" style={{ paddingTop: 8, borderTop: '1px solid var(--line)' }}>좋음 3개면 초록, 2개 노랑, 1개 이하 빨강. 매매 신호는 아니에요.</div>
         </section>
       ) : (
         <section className="card">
@@ -80,7 +80,7 @@ export default async function Today() {
             <Link key={q.id} href={`/indicator/${q.id}`} className="quote">
               <span style={{ display: 'flex', gap: 6, alignItems: 'center', minWidth: 0 }}>
                 <span style={{ fontSize: 15, fontWeight: 500 }}>{q.name}</span>
-                {warn ? <span className="tag warn">조금 불안</span> : big && <span className="tag">평소보다 큰 움직임</span>}
+                {warn ? <span className="tag warn">조금 불안</span> : big && <span className="tag">큰 움직임</span>}
               </span>
               <span className="v">{num(q.value, quoteDigits(q.id, q.unit))}{q.unit ?? ''}</span>
               <span className="sub">{q.note ?? `한 달 ${pct(q.m1)}, 1년 ${pct(q.y1, 0)}`}</span>
@@ -88,7 +88,7 @@ export default async function Today() {
             </Link>
           );
         })}
-        <div className="muted" style={{ padding: '8px 0 10px', borderTop: '1px solid var(--line)' }}>오른쪽 아래는 오늘 변화예요. 평소 하루 움직임의 2배를 넘으면 표시해요.</div>
+        <div className="muted" style={{ padding: '8px 0 10px', borderTop: '1px solid var(--line)' }}>값 아래는 오늘 변화. 평소의 2배 넘게 움직이면 표시해요.</div>
       </section>
       {AI.market && (
         <section className="card">
@@ -97,7 +97,7 @@ export default async function Today() {
             <dt>미국</dt><dd>{AI.market.us}</dd>
             <dt>한국</dt><dd>{AI.market.kr}</dd>
           </dl>
-          <div className="muted" style={{ marginTop: 10 }}>위 지표, 신호등, 오늘 뉴스를 근거로 {AI.generatedAt?.slice(0, 16).replace('T', ' ')}에 작성</div>
+          <div className="muted" style={{ marginTop: 10 }}>지표·신호등·뉴스 기준, {AI.generatedAt?.slice(5, 16).replace('-', '.').replace('T', ' ')} 작성</div>
         </section>
       )}
       {AI.news && AI.news.length ? <HotNews news={AI.news} /> : (
