@@ -10,7 +10,7 @@ import json
 import os
 from pathlib import Path
 
-from .core import PARTS, BriefError, check_main, check_why, cluster_news, merge, trend_targets
+from .core import BriefError, check_main, check_why, cluster_news, match_news, merge, split_parts, trend_targets
 
 
 def _latest(conn) -> tuple:
@@ -58,7 +58,33 @@ def _fundamentals(conn, codes: list[str]) -> dict[str, list[dict]]:
     return out
 
 
-def prepare(conn, d: Path, force: bool = True) -> dict[str, int]:
+def _naver_item_news(items: list[dict], day: str, env, fetch=None, log=print) -> dict[str, list[dict]]:
+    """한국 주식: 입력 뉴스가 3개 미만이면 종목 이름으로 네이버 뉴스를 한 번 찾는다(키는 Secrets NAVER_CLIENT_ID·NAVER_CLIENT_SECRET, 없으면 건너뜀)."""
+    cid, sec = env.get("NAVER_CLIENT_ID"), env.get("NAVER_CLIENT_SECRET")
+    if not (cid and sec):
+        return {}
+    from quant.ingest import sources as S
+    from quant.ingest.http import HttpError, requests_fetch
+    fetch = fetch or requests_fetch()
+    out, fails = {}, 0
+    for e in items:
+        if e["market"] != "KR" or e["kind"] != "주식" or len(e.get("news", [])) >= 3 or len(e["name"]) < 2:
+            continue
+        try:
+            rows = S.naver_news(fetch, e["name"], cid, sec, display=30)
+        except (HttpError, KeyError, ValueError) as ex:
+            fails += 1
+            if fails >= 5:      # 키·한도 문제면 계속 두드리지 않는다
+                log(f"네이버 종목 뉴스: 실패 {fails}번 — 멈춤({type(ex).__name__})")
+                break
+            continue
+        got = match_news(e["name"], rows, day)
+        if got:
+            out[e["key"]] = got
+    return out
+
+
+def prepare(conn, d: Path, force: bool = True, env=os.environ, fetch=None) -> dict[str, int]:
     """force=False(예약 실행): 이 날짜 데이터로 이미 썼으면 아무것도 안 만든다(빈 dict)."""
     day, payload = _latest(conn)
     if not payload:
@@ -74,22 +100,32 @@ def prepare(conn, d: Path, force: bool = True) -> dict[str, int]:
             "movers": {k: v[:5] for k, v in trend_targets(payload.get("universe", []), payload.get("bench", {}), 5).items()}}
     sizes = {"main": len(main["news"])}
     (d / "in-main.json").write_text(json.dumps(main, ensure_ascii=False, default=str))
-    for part, items in trend_targets(payload.get("universe", []), payload.get("bench", {})).items():
+    for old in d.glob("in-why-*.json"):
+        old.unlink()
+    whole = trend_targets(payload.get("universe", []), payload.get("bench", {}))
+    for items in whole.values():
         news = _item_news(conn, items)
         fund = _fundamentals(conn, [e["code"] for e in items if e["market"] == "US" and e["kind"] == "주식"])
         for e in items:
             e["news"] = news.get(e["key"], [])
             if e["key"] in fund:
                 e["fundamentals"] = fund[e["key"]]
+        extra = _naver_item_news(items, str(day), env, fetch)
+        for e in items:
+            if e["key"] in extra:
+                have = {n["title"] for n in e["news"]}
+                e["news"] = (e["news"] + [n for n in extra[e["key"]] if n["title"] not in have])[:8]
+    for part, items in split_parts(whole).items():
         (d / f"in-{part}.json").write_text(json.dumps({"date": str(day), "items": items}, ensure_ascii=False, default=str))
         sizes[part] = len(items)
+        sizes[part + " 뉴스 있는 종목"] = sum(1 for e in items if e["news"])
     return sizes
 
 
 def save(conn, d: Path, out=print) -> dict[str, str]:
     day, payload = _latest(conn)
     parts, status = {}, {}
-    for part in PARTS:
+    for part in sorted(f.name[3:-5] for f in d.glob("in-*.json")):   # 나뉜 부분(why-kr-stock-1 …)까지 있는 대로
         fin, fout = d / f"in-{part}.json", d / f"out-{part}.json"
         if not fin.exists() or not fout.exists():
             status[part] = "출력 없음"
@@ -99,7 +135,8 @@ def save(conn, d: Path, out=print) -> dict[str, str]:
             if inp.get("date") != str(day):
                 raise BriefError(f"날짜 다름({inp.get('date')} ≠ {day})")
             parts[part] = check_main(res, inp) if part == "main" else check_why(res, inp)
-            status[part] = "ok" if part == "main" else f"ok {len(parts[part]['items'])}/{len(inp['items'])}개"
+            status[part] = "ok" if part == "main" else (
+                f"ok {len(parts[part]['items'])}/{len(inp['items'])}개" + (f" (같은 문장·근거 없음으로 버림 {len(parts[part]['dropped'])})" if parts[part]["dropped"] else ""))
         except (BriefError, json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
             status[part] = f"실패: {e}"
     for k, v in status.items():

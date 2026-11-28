@@ -64,7 +64,7 @@ export default async function Stock({ params, searchParams }: { params: Promise<
             <div className="sub" style={{ marginTop: 6 }}>AI 해석은 틀릴 수 있어요.</div>
           </section>
         </>
-      ) : item && <div className="sub" style={{ margin: '12px 16px 0' }}>AI 해석은 트렌드 TOP 15 종목에만 매일 써요.</div>}
+      ) : item && <div className="sub" style={{ margin: '12px 16px 0' }}>오늘은 AI 해석이 없어요. 트렌드 TOP 15 중 이유를 찾은 종목만 써요.</div>}
       {item && (st && st.days >= 20 ? (
         <section className="card">
           <h2>1년 흐름과 위험</h2>

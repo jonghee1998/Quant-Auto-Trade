@@ -1,3 +1,4 @@
+import json
 import pytest
 
 from quant.brief import core as B
@@ -77,3 +78,56 @@ def test_cluster_korean_titles_despite_particles():
 def test_merge_records_data_date():
     p = B.merge({}, {"main": {"today": {}, "market": {}, "news": []}}, generated_at="t", data_date="2024-01-02")
     assert p["ai"]["date"] == "2024-01-02"
+
+
+def test_split_parts_by_rank_into_chunks_of_22_or_less():
+    items = [{"key": f"KR:TEST{i:02d}", "lists": [f"1개월 강한 {i % 15 + 1}위", "3개월 약한 9위"]} for i in range(66)]
+    p = B.split_parts({"why-kr-stock": items, "why-us": items[:10]})
+    assert sorted(p) == ["why-kr-stock-1", "why-kr-stock-2", "why-kr-stock-3", "why-us"]
+    assert [len(p[f"why-kr-stock-{i}"]) for i in (1, 2, 3)] == [22, 22, 22]
+    assert {e["key"] for k in p if k.startswith("why-kr") for e in p[k]} == {e["key"] for e in items}   # 빠진 종목 없음
+    assert B.best_rank(p["why-kr-stock-1"][0]) == 1 and B.best_rank(p["why-kr-stock-3"][0]) == 1     # 조각마다 높은 순위부터
+    assert B.best_rank({"lists": []}) == 99
+
+
+def test_check_why_drops_copied_sentences_and_unsupported_low_confidence():
+    inp = {"items": [{"key": f"KR:TEST{i:02d}"} for i in range(6)]}
+    same = {"line": "뚜렷한 이유를 못 찾았어요", "text": "뚜렷한 이유를 못 찾았어요.", "confidence": "낮음", "evidence": []}
+    good = {"line": "수주 공시", "text": "합성 공시로 올랐어요.", "confidence": "보통", "evidence": [{"type": "공시", "label": "합성 공시", "url": "https://e.example/d"}]}
+    copy = dict(good, text="업종 전체가 올랐어요.")
+    out = {"items": {"KR:TEST00": same, "KR:TEST01": dict(same), "KR:TEST02": dict(same), "KR:TEST03": good,
+                     "KR:TEST04": {"line": "x", "text": "혼자만 근거 없이 낮음", "confidence": "낮음", "evidence": []}}}
+    w = B.check_why(out, inp)
+    assert list(w["items"]) == ["KR:TEST03"] and set(w["dropped"]) == {"KR:TEST00", "KR:TEST01", "KR:TEST02", "KR:TEST04"}
+    three = B.check_why({"items": {f"KR:TEST{i:02d}": dict(copy) for i in range(3)}}, inp)      # 근거가 있어도 같은 문장 3개면 복사로 본다
+    assert three["items"] == {} and len(three["dropped"]) == 3
+    p = B.merge({"ai": {"why": {"KR:TEST00": {"line": "어제 값"}, "KR:OLD": {}}}}, {"why-kr-stock-1": w}, generated_at="t")
+    assert set(p["ai"]["why"]) == {"KR:OLD", "KR:TEST03"}                                       # 버린 종목은 이전 값도 지운다
+
+
+def test_match_news_needs_name_in_title_and_recent_date():
+    rows = [{"title": "가짜종목A 대규모 수주", "url": "https://e.example/1", "publisher": None, "published_at": "2026-11-20T09:00:00+09:00"},
+            {"title": "가짜종목A 대규모 수주", "url": "https://e.example/2", "publisher": None, "published_at": "2026-11-19T09:00:00+09:00"},
+            {"title": "다른 회사 소식", "url": "https://e.example/3", "publisher": None, "published_at": "2026-11-21T09:00:00+09:00"},
+            {"title": "가짜종목A 옛날 기사", "url": "https://e.example/4", "publisher": None, "published_at": "2026-09-01T09:00:00+09:00"},
+            {"title": "가짜종목A 내일 기사", "url": "https://e.example/5", "publisher": None, "published_at": "2026-11-28T09:00:00+09:00"}]
+    got = B.match_news("가짜종목A", rows, "2026-11-27")
+    assert [g["url"] for g in got] == ["https://e.example/1"] and got[0]["at"] == "2026-11-20"   # 같은 제목은 한 번, 미래·옛 기사 제외
+
+
+def test_naver_item_news_only_for_korean_stocks_short_on_news():
+    from quant.brief import run as R
+    from quant.ingest.http import Response
+    calls = []
+
+    def fetch(url, params=None, headers=None):
+        calls.append(params["query"])
+        return Response(200, json.dumps({"items": [{"title": f"{params['query']} 신제품 발표", "originallink": "https://e.example/n",
+                                                    "pubDate": "Thu, 26 Nov 2026 10:00:00 +0900"}]}))
+    items = [{"key": "KR:TEST01", "name": "가짜종목A", "market": "KR", "kind": "주식", "news": []},
+             {"key": "KR:TEST02", "name": "가짜종목B", "market": "KR", "kind": "주식", "news": [{"title": "t"}] * 3},
+             {"key": "US:FAKE1", "name": "Fake", "market": "US", "kind": "주식", "news": []}]
+    env = {"NAVER_CLIENT_ID": "FAKE-ID", "NAVER_CLIENT_SECRET": "FAKE-SECRET"}
+    got = R._naver_item_news(items, "2026-11-27", env, fetch)
+    assert calls == ["가짜종목A"] and list(got) == ["KR:TEST01"] and got["KR:TEST01"][0]["title"] == "가짜종목A 신제품 발표"
+    assert R._naver_item_news(items, "2026-11-27", {}, fetch) == {}     # 키 없으면 건너뜀
